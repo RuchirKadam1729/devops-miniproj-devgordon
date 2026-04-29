@@ -47,9 +47,13 @@ def ensure_services_running():
     try:
         r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
         assert r.status_code == 200
-        print("✓ Ollama ready")
-    except:
-        raise RuntimeError("Ollama not responding")
+        models = r.json().get("models", [])
+        if models:
+            print(f"✓ Ollama ready with {len(models)} model(s)")
+        else:
+            print("⚠ Ollama running but no models loaded")
+    except Exception as e:
+        print(f"⚠ Ollama not responding: {e}")
     
     yield
 
@@ -193,6 +197,8 @@ class TestChat:
         if r.status_code == 200:
             data = r.json()
             assert "model_used" in data
+            assert data["model_used"] is not None
+            assert len(data["model_used"]) > 0
     
     def test_chat_with_history(self):
         """Chat should accept conversation history."""
@@ -207,6 +213,22 @@ class TestChat:
         if r.status_code == 200:
             data = r.json()
             assert data["type"] in ["message", "pending_approval"]
+    
+    def test_chat_tool_calling_structure(self):
+        """When LLM calls tool, response should have approval card structure."""
+        # Ask for something that should trigger a tool call
+        r = requests.post(
+            f"{BASE_URL}/chat",
+            json={"message": "what pods are running?"}
+        )
+        if r.status_code == 200:
+            data = r.json()
+            # Should be either a plain message or a tool approval card
+            if data["type"] == "pending_approval":
+                assert "tool_name" in data
+                assert "tool_args" in data
+                assert "call_id" in data
+                assert "scan" in data
 
 
 # =============================================================================

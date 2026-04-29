@@ -1,13 +1,6 @@
 FROM ollama/ollama:latest
 
-# Note: Ollama models will be persisted in the volume (ollama_models:/root/.ollama)
-# This volume is shared with your host Docker volume storage.
-# After pulling a model once, it stays cached for all future containers.
-#
-# First run (one time only):
-#   docker compose up -d
-#   docker exec devgordon-ollama ollama pull llama3
-#
-# Subsequent runs:
-#   docker compose down && docker compose up -d
-#   Model is already cached in the volume, so it's instant.
+# Keep it simple — just run Ollama server.
+# Model pulling happens via docker compose initialization.
+
+EXPOSE 11434

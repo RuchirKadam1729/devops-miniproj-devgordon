@@ -1,50 +1,54 @@
 # ---- DevGordon docker-compose.yml ----
-# Run the entire stack with: docker compose up
+# Run the entire stack: docker compose up -d
 #
 # Services:
-#   app        — The FastAPI backend + web UI (port 8000)
-#   ollama     — Local LLM server (port 11434)
-#   sonarqube  — Code quality scanning in the CI/CD pipeline (port 9000)
+#   app        — FastAPI backend + web UI (port 8000) — uses Ollama for all reasoning
+#   ollama     — Local LLM server with tool calling (port 11434)
+#   sonarqube  — Code quality scanning in CI/CD pipeline (port 9000)
 #   jenkins    — CI/CD server (port 8080)
 #
 # First time setup:
 #   1. docker compose up -d
-#   2. docker exec devgordon-ollama ollama pull llama3.2
+#   2. ./scripts/pull-ollama-model.sh qwen3:8b   (pull model, ~5-10 min)
 #   3. Open http://localhost:8000
+#
+# To use a different model:
+#   ./scripts/pull-ollama-model.sh llama3.1:8b
+#   Or change via the web UI: /select-model
+#
+# Model persists in the ollama_models Docker volume:
+# - First pull: downloads model (~5-10 min)
+# - Subsequent runs: instant, model loaded from volume
+# - Switching models: pull again with different name
 
 services:
 
-  # ---- Your app ----
   app:
     build:
-      context: .              # Root of the repo — Dockerfile and requirements.txt both live here
+      context: .
       dockerfile: Dockerfile
     container_name: devgordon-app
     ports:
       - "8000:8000"
     environment:
-      # These connect DevGordon to the other services
+      # ---- Local infrastructure ----
       OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}  # Override with env var
       JENKINS_URL: http://jenkins:8080
       JENKINS_USER: admin
-      JENKINS_TOKEN: ${JENKINS_TOKEN:-}     # Set in .env file
+      JENKINS_TOKEN: ${JENKINS_TOKEN:-}
       SONAR_URL: http://sonarqube:9000
       SONAR_TOKEN: ${SONAR_TOKEN:-}
     depends_on:
-      - ollama
+      ollama:
+        condition: service_healthy
     volumes:
-      # Mount kubeconfig so kubectl inside the container can reach Minikube
-      # If you're running Minikube on the host, this exposes its config
       - ${HOME}/.kube:/home/devgordon/.kube:ro
       - ${HOME}/.minikube:/home/devgordon/.minikube:ro
     networks:
       - devgordon-net
     restart: unless-stopped
 
-  # ---- Ollama: local LLM ----
-  # This is what replaces the OpenAI/Anthropic API.
-  # No data leaves your machine.
-  # Uses custom Dockerfile to pre-bake llama3 so pulls are instant.
   ollama:
     build:
       context: .
@@ -53,12 +57,17 @@ services:
     ports:
       - "11434:11434"
     volumes:
-      # Persist downloaded models so you don't re-download after restart
+      # Persist downloaded models — no re-download on restart
       - ollama_models:/root/.ollama
     networks:
       - devgordon-net
     restart: unless-stopped
-    # If you have a GPU: uncomment below
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list > /dev/null 2>&1"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+    # GPU support (uncomment if available):
     # deploy:
     #   resources:
     #     reservations:
@@ -67,18 +76,14 @@ services:
     #           count: 1
     #           capabilities: [gpu]
 
-  # ---- Jenkins: CI/CD ----
-  # Access at http://localhost:8080
-  # First login: docker exec devgordon-jenkins cat /var/jenkins_home/secrets/initialAdminPassword
   jenkins:
     image: jenkins/jenkins:lts-jdk17
     container_name: devgordon-jenkins
     ports:
       - "8080:8080"
-      - "50000:50000"    # Jenkins agent port
+      - "50000:50000"
     volumes:
       - jenkins_home:/var/jenkins_home
-      # Allow Jenkins to run Docker commands on the host
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       JENKINS_OPTS: "--httpPort=8080"
@@ -86,23 +91,20 @@ services:
       - devgordon-net
     restart: unless-stopped
 
-  # ---- SonarQube: code quality ----
-  # Access at http://localhost:9000 (admin/admin on first login)
-  # Used in the Jenkins pipeline for source code scanning
   sonarqube:
     image: sonarqube:10-community
     container_name: devgordon-sonarqube
     ports:
       - "9000:9000"
     environment:
-      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"   # Required for some hosts
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
     volumes:
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_logs:/opt/sonarqube/logs
     networks:
       - devgordon-net
     restart: unless-stopped
-    # SonarQube needs higher vm.max_map_count — run on host:
+    # Note: SonarQube requires vm.max_map_count >= 524288 on the host:
     # sudo sysctl -w vm.max_map_count=524288
 
 volumes:

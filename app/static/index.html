@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>DevGordon</title>
 <style>
-  /* ---- Design: dark terminal aesthetic, not AI-product pastels ---- */
   :root {
     --bg: #0e1117;
     --surface: #161b22;
@@ -47,7 +46,6 @@
     color: var(--green);
     font-family: 'Courier New', monospace;
   }
-
   .logo span { color: var(--text-muted); font-weight: 400; }
 
   .status-dot {
@@ -56,7 +54,6 @@
     background: var(--green);
     animation: pulse 2s infinite;
   }
-
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
@@ -76,10 +73,8 @@
     cursor: pointer;
     font-size: 0.8rem;
   }
-
   button.secondary:hover { border-color: var(--text-muted); color: var(--text); }
 
-  /* ---- Chat area ---- */
   #chat {
     flex: 1;
     overflow-y: auto;
@@ -89,11 +84,7 @@
     gap: 16px;
   }
 
-  .message {
-    max-width: 760px;
-    width: 100%;
-  }
-
+  .message { max-width: 760px; width: 100%; }
   .message.user { margin-left: auto; }
 
   .message-bubble {
@@ -108,7 +99,6 @@
     border: 1px solid #2d5a8e;
     border-radius: 8px 8px 2px 8px;
   }
-
   .assistant .message-bubble {
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -122,7 +112,7 @@
     padding: 0 4px;
   }
 
-  /* ---- Permission gate card ---- */
+  /* ---- Approval card ---- */
   .approval-card {
     background: var(--card-bg);
     border: 1px solid var(--yellow);
@@ -130,7 +120,6 @@
     overflow: hidden;
     max-width: 760px;
   }
-
   .approval-card.scan-error { border-color: var(--red); }
   .approval-card.scan-clean { border-color: var(--green); }
 
@@ -145,13 +134,11 @@
     color: var(--yellow);
     border-bottom: 1px solid rgba(210, 153, 34, 0.2);
   }
-
   .approval-card.scan-error .card-header {
     background: rgba(248, 81, 73, 0.1);
     color: var(--red);
     border-bottom-color: rgba(248, 81, 73, 0.2);
   }
-
   .approval-card.scan-clean .card-header {
     background: rgba(63, 185, 80, 0.08);
     color: var(--green);
@@ -160,11 +147,7 @@
 
   .card-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 
-  .explanation {
-    font-size: 0.9rem;
-    line-height: 1.6;
-    color: var(--text);
-  }
+  .explanation { font-size: 0.9rem; line-height: 1.6; color: var(--text); }
 
   .tool-label {
     font-size: 0.75rem;
@@ -197,33 +180,24 @@
     flex-direction: column;
     gap: 4px;
   }
-
   .scan-result.clean {
     background: rgba(63, 185, 80, 0.08);
     border: 1px solid rgba(63, 185, 80, 0.3);
     color: var(--green);
   }
-
   .scan-result.warning {
     background: rgba(210, 153, 34, 0.08);
     border: 1px solid rgba(210, 153, 34, 0.3);
     color: var(--yellow);
   }
-
   .scan-result.error {
     background: rgba(248, 81, 73, 0.08);
     border: 1px solid rgba(248, 81, 73, 0.3);
     color: var(--red);
   }
-
   .scan-issue { padding-left: 8px; }
 
-  .card-actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    padding-top: 4px;
-  }
+  .card-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
 
   button.approve {
     background: var(--green);
@@ -235,7 +209,6 @@
     font-weight: 700;
     font-size: 0.85rem;
   }
-
   button.approve:hover { background: #4ac963; }
 
   button.reject {
@@ -248,7 +221,6 @@
     font-weight: 600;
     font-size: 0.85rem;
   }
-
   button.reject:hover { background: rgba(248, 81, 73, 0.1); }
 
   button.modify {
@@ -260,13 +232,9 @@
     cursor: pointer;
     font-size: 0.85rem;
   }
-
   button.modify:hover { border-color: var(--text-muted); color: var(--text); }
 
-  button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
 
   /* ---- Result block ---- */
   .result-block {
@@ -276,20 +244,15 @@
     overflow: hidden;
     max-width: 760px;
   }
-
   .result-header {
     padding: 8px 16px;
     font-size: 0.8rem;
     font-weight: 600;
     border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 6px;
+    display: flex; align-items: center; gap: 6px;
   }
-
   .result-header.success { color: var(--green); }
   .result-header.failure { color: var(--red); }
-
   .result-output {
     padding: 12px 16px;
     font-family: 'Courier New', monospace;
@@ -324,12 +287,7 @@
     font-family: inherit;
     line-height: 1.5;
   }
-
-  #message-input:focus {
-    outline: none;
-    border-color: var(--blue);
-  }
-
+  #message-input:focus { outline: none; border-color: var(--blue); }
   #message-input::placeholder { color: var(--text-muted); }
 
   #send-btn {
@@ -343,38 +301,31 @@
     font-size: 0.9rem;
     height: 44px;
   }
-
   #send-btn:hover { background: #79b8ff; }
   #send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   /* ---- Typing indicator ---- */
   .typing {
-    display: flex;
-    align-items: center;
-    gap: 4px;
+    display: flex; align-items: center; gap: 4px;
     padding: 12px 16px;
     background: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: 2px 8px 8px 8px;
     width: fit-content;
   }
-
   .typing span {
     width: 6px; height: 6px;
     background: var(--text-muted);
     border-radius: 50%;
     animation: bounce 1.2s infinite;
   }
-
   .typing span:nth-child(2) { animation-delay: 0.2s; }
   .typing span:nth-child(3) { animation-delay: 0.4s; }
-
   @keyframes bounce {
     0%, 60%, 100% { transform: translateY(0); }
     30% { transform: translateY(-6px); }
   }
 
-  /* ---- Scrollbar ---- */
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -385,18 +336,18 @@
 <header>
   <div class="status-dot" id="status-dot"></div>
   <div class="logo">DevGordon <span>// local DevOps agent</span></div>
+
   <div class="header-actions">
     <button class="secondary" onclick="resetConversation()">New conversation</button>
   </div>
 </header>
 
 <div id="chat">
-  <!-- Welcome message -->
   <div class="message assistant">
     <div class="message-meta">DevGordon</div>
     <div class="message-bubble">
       Hey. I can interact with your DevOps stack — Jenkins, Ansible, Kubernetes, Docker.<br><br>
-      I'll <strong>explain what I'm about to do</strong> and show you the exact command or playbook before anything runs. You approve or reject.<br><br>
+      I'll <strong>explain what I'm about to do</strong> and show you the exact command or playbook before anything runs. You approve or reject. I also scan generated code for security issues before execution.<br><br>
       Try: <em>"what pods are running?"</em> or <em>"trigger the build job"</em> or <em>"show me recent Jenkins builds"</em>
     </div>
   </div>
@@ -416,9 +367,9 @@
 <script>
 // ---- State ----
 let isWaiting = false;
-let pendingAction = null;  // Stores the pending tool call for approve/reject
+let pendingAction = null;
 
-// ---- Core send function ----
+// ---- Core send ----
 async function sendMessage(overrideText) {
   const input = document.getElementById('message-input');
   const text = overrideText || input.value.trim();
@@ -427,7 +378,6 @@ async function sendMessage(overrideText) {
   if (!overrideText) input.value = '';
   autoResize(input);
   setWaiting(true);
-
   appendUserMessage(text);
   const typingEl = appendTyping();
 
@@ -437,6 +387,15 @@ async function sendMessage(overrideText) {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({message: text})
     });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({detail: resp.statusText}));
+      typingEl.remove();
+      appendAssistantMessage(`⚠ ${err.detail || 'Backend error'}`);
+      setWaiting(false);
+      return;
+    }
+
     const data = await resp.json();
     typingEl.remove();
 
@@ -448,7 +407,7 @@ async function sendMessage(overrideText) {
     }
   } catch (err) {
     typingEl.remove();
-    appendAssistantMessage(`⚠ Error connecting to backend: ${err.message}. Is the server running?`);
+    appendAssistantMessage(`⚠ Cannot reach backend: ${err.message}`);
   }
 
   setWaiting(false);
@@ -459,7 +418,6 @@ async function approveAction(callId) {
   if (!pendingAction) return;
   disableCardButtons(callId);
   appendUserMessage('✓ Approved');
-
   setWaiting(true);
   const loadingEl = appendTyping();
 
@@ -475,10 +433,14 @@ async function approveAction(callId) {
     });
     const data = await resp.json();
     loadingEl.remove();
+
+    // Show raw execution result
     appendResultBlock(data.result);
 
-    // After execution, ask the LLM to interpret the result
-    await sendMessage(`The action completed. Here's what happened: ${JSON.stringify(data.result.output).substring(0, 500)}. Please explain what this output means.`);
+    // Show Claude's interpretation of the output (no extra round-trip needed)
+    if (data.interpretation) {
+      appendAssistantMessage(data.interpretation);
+    }
   } catch (err) {
     loadingEl.remove();
     appendAssistantMessage(`⚠ Execution error: ${err.message}`);
@@ -491,9 +453,11 @@ async function approveAction(callId) {
 async function rejectAction(callId) {
   disableCardButtons(callId);
   appendUserMessage('✗ Rejected');
+  setWaiting(true);
+  const loadingEl = appendTyping();
 
   try {
-    await fetch('/reject', {
+    const resp = await fetch('/reject', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -502,11 +466,18 @@ async function rejectAction(callId) {
         tool_call_id: callId
       })
     });
-    pendingAction = null;
-    await sendMessage('I rejected that. Can you suggest an alternative?');
+    const data = await resp.json();
+    loadingEl.remove();
+    if (data.suggestion) {
+      appendAssistantMessage(data.suggestion);
+    }
   } catch (err) {
-    appendAssistantMessage(`Error: ${err.message}`);
+    loadingEl.remove();
+    appendAssistantMessage('Understood — rejected. What would you like to do instead?');
   }
+
+  pendingAction = null;
+  setWaiting(false);
 }
 
 function modifyAction(callId) {
@@ -514,7 +485,6 @@ function modifyAction(callId) {
   const input = document.getElementById('message-input');
   input.value = "Actually, let's do it differently: ";
   input.focus();
-  // Move cursor to end
   input.selectionStart = input.selectionEnd = input.value.length;
   pendingAction = null;
 }
@@ -548,10 +518,9 @@ function appendAssistantMessage(text) {
 function appendApprovalCard(data) {
   const chat = document.getElementById('chat');
   const scan = data.scan || {status: 'skipped', issues: []};
-  const scanClass = scan.status === 'clean' ? 'scan-clean' :
-                    scan.status === 'error'  ? 'scan-error' : '';
+  const scanClass = scan.status === 'clean' ? 'scan-clean'
+                  : scan.status === 'error'  ? 'scan-error' : '';
 
-  // Format the args for display
   const argsDisplay = formatArgsForDisplay(data.tool_name, data.tool_args);
 
   const scanHtml = scan.status === 'clean'
@@ -559,8 +528,8 @@ function appendApprovalCard(data) {
     : scan.status === 'skipped'
     ? `<div class="scan-result" style="background:rgba(125,133,144,0.1);border:1px solid var(--border);color:var(--text-muted)">⊘ Scan skipped</div>`
     : `<div class="scan-result ${scan.status}">
-        <strong>${scan.status === 'error' ? '✗ Issues found' : '⚠ Warnings'}</strong>
-        ${scan.issues.map(i => `<div class="scan-issue">• ${escapeHtml(i)}</div>`).join('')}
+        <strong>${scan.status === 'error' ? '✗ Issues found — review before approving' : '⚠ Warnings found'}</strong>
+        ${(scan.issues || []).map(i => `<div class="scan-issue">• ${escapeHtml(i)}</div>`).join('')}
        </div>`;
 
   const el = document.createElement('div');
@@ -624,7 +593,6 @@ function disableCardButtons(callId) {
 
 // ---- Utilities ----
 function formatArgsForDisplay(toolName, args) {
-  // Make args readable for each tool type
   if (toolName === 'run_ansible_playbook') {
     return args.playbook_content || JSON.stringify(args, null, 2);
   } else if (toolName === 'kubectl_command') {
@@ -635,13 +603,14 @@ function formatArgsForDisplay(toolName, args) {
     const params = Object.keys(args.parameters || {}).length > 0
       ? `\nParameters: ${JSON.stringify(args.parameters)}` : '';
     return `Trigger Jenkins job: "${args.job_name}"${params}`;
+  } else if (toolName === 'jenkins_status') {
+    return `Jenkins: ${args.action}${args.job_name ? ' → ' + args.job_name : ''}`;
   }
   return JSON.stringify(args, null, 2);
 }
 
 function formatMessage(text) {
   if (!text) return '';
-  // Convert backtick code to styled spans
   return escapeHtml(text)
     .replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:2px 6px;border-radius:4px;font-family:monospace;color:var(--orange)">$1</code>')
     .replace(/\n/g, '<br>');
@@ -689,12 +658,19 @@ async function resetConversation() {
   pendingAction = null;
 }
 
-// ---- Check backend connection on load ----
+// ---- Check backend on load ----
 window.addEventListener('load', async () => {
   try {
-    const resp = await fetch('/history');
+    const resp = await fetch('/health');
+    const data = await resp.json();
     if (!resp.ok) throw new Error();
-    document.getElementById('status-dot').style.background = 'var(--green)';
+
+    if (data.claude_api !== 'configured') {
+      document.getElementById('status-dot').style.background = 'var(--yellow)';
+      document.getElementById('status-dot').style.animation = 'none';
+    } else {
+      document.getElementById('status-dot').style.background = 'var(--green)';
+    }
   } catch {
     document.getElementById('status-dot').style.background = 'var(--red)';
     document.getElementById('status-dot').style.animation = 'none';
