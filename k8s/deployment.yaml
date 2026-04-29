@@ -1,0 +1,77 @@
+# k8s/deployment.yaml
+# Kubernetes Deployment for DevGordon
+#
+# A Deployment manages a set of identical Pods (containers).
+# It handles: starting them, restarting if they crash, rolling updates.
+#
+# The {{ deploy_image_tag }} is substituted by Ansible when it applies this.
+# If applying directly with kubectl, replace it with an actual tag:
+#   sed 's/{{ deploy_image_tag }}/latest/g' deployment.yaml | kubectl apply -f -
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devgordon
+  namespace: devgordon
+  labels:
+    app: devgordon
+    version: "{{ deploy_image_tag }}"
+spec:
+  replicas: 1
+  # Selector: how the Deployment finds which Pods it manages
+  selector:
+    matchLabels:
+      app: devgordon
+  # Rolling update strategy: bring up new pods before killing old ones
+  # This means zero downtime during updates
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app: devgordon
+    spec:
+      containers:
+        - name: devgordon
+          image: devgordon:{{ deploy_image_tag }}
+          imagePullPolicy: Never    # Use local image (Minikube's Docker daemon)
+          ports:
+            - containerPort: 8000
+          env:
+            - name: OLLAMA_URL
+              value: "http://ollama-service:11434"
+            - name: JENKINS_URL
+              value: "http://jenkins-service:8080"
+            - name: JENKINS_USER
+              value: "admin"
+            - name: JENKINS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: devgordon-secrets
+                  key: jenkins-token
+                  optional: true
+          # Resource limits: prevents one pod from eating all memory
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          # Liveness probe: if this fails, K8s restarts the container
+          livenessProbe:
+            httpGet:
+              path: /history
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          # Readiness probe: if this fails, K8s stops sending traffic to this pod
+          readinessProbe:
+            httpGet:
+              path: /history
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10

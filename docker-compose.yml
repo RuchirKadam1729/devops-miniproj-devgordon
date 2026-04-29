@@ -1,0 +1,116 @@
+# ---- DevGordon docker-compose.yml ----
+# Run the entire stack with: docker compose up
+#
+# Services:
+#   app        — The FastAPI backend + web UI (port 8000)
+#   ollama     — Local LLM server (port 11434)
+#   sonarqube  — Code quality scanning in the CI/CD pipeline (port 9000)
+#   jenkins    — CI/CD server (port 8080)
+#
+# First time setup:
+#   1. docker compose up -d
+#   2. docker exec devgordon-ollama ollama pull llama3.2
+#   3. Open http://localhost:8000
+
+services:
+
+  # ---- Your app ----
+  app:
+    build:
+      context: .              # Root of the repo — Dockerfile and requirements.txt both live here
+      dockerfile: Dockerfile
+    container_name: devgordon-app
+    ports:
+      - "8000:8000"
+    environment:
+      # These connect DevGordon to the other services
+      OLLAMA_URL: http://ollama:11434
+      JENKINS_URL: http://jenkins:8080
+      JENKINS_USER: admin
+      JENKINS_TOKEN: ${JENKINS_TOKEN:-}     # Set in .env file
+      SONAR_URL: http://sonarqube:9000
+      SONAR_TOKEN: ${SONAR_TOKEN:-}
+    depends_on:
+      - ollama
+    volumes:
+      # Mount kubeconfig so kubectl inside the container can reach Minikube
+      # If you're running Minikube on the host, this exposes its config
+      - ${HOME}/.kube:/home/devgordon/.kube:ro
+      - ${HOME}/.minikube:/home/devgordon/.minikube:ro
+    networks:
+      - devgordon-net
+    restart: unless-stopped
+
+  # ---- Ollama: local LLM ----
+  # This is what replaces the OpenAI/Anthropic API.
+  # No data leaves your machine.
+  # Uses custom Dockerfile to pre-bake llama3 so pulls are instant.
+  ollama:
+    build:
+      context: .
+      dockerfile: Dockerfile.ollama
+    container_name: devgordon-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      # Persist downloaded models so you don't re-download after restart
+      - ollama_models:/root/.ollama
+    networks:
+      - devgordon-net
+    restart: unless-stopped
+    # If you have a GPU: uncomment below
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  # ---- Jenkins: CI/CD ----
+  # Access at http://localhost:8080
+  # First login: docker exec devgordon-jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+  jenkins:
+    image: jenkins/jenkins:lts-jdk17
+    container_name: devgordon-jenkins
+    ports:
+      - "8080:8080"
+      - "50000:50000"    # Jenkins agent port
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      # Allow Jenkins to run Docker commands on the host
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      JENKINS_OPTS: "--httpPort=8080"
+    networks:
+      - devgordon-net
+    restart: unless-stopped
+
+  # ---- SonarQube: code quality ----
+  # Access at http://localhost:9000 (admin/admin on first login)
+  # Used in the Jenkins pipeline for source code scanning
+  sonarqube:
+    image: sonarqube:10-community
+    container_name: devgordon-sonarqube
+    ports:
+      - "9000:9000"
+    environment:
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"   # Required for some hosts
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+    networks:
+      - devgordon-net
+    restart: unless-stopped
+    # SonarQube needs higher vm.max_map_count — run on host:
+    # sudo sysctl -w vm.max_map_count=524288
+
+volumes:
+  ollama_models:
+  jenkins_home:
+  sonarqube_data:
+  sonarqube_logs:
+
+networks:
+  devgordon-net:
+    driver: bridge

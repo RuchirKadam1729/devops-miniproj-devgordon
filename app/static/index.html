@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DevGordon</title>
+<style>
+  /* ---- Design: dark terminal aesthetic, not AI-product pastels ---- */
+  :root {
+    --bg: #0e1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #7d8590;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+    --orange: #ffa657;
+    --card-bg: #1c2128;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--surface);
+  }
+
+  .logo {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--green);
+    font-family: 'Courier New', monospace;
+  }
+
+  .logo span { color: var(--text-muted); font-weight: 400; }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 2s infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .header-actions {
+    margin-left: auto;
+    display: flex; gap: 8px;
+  }
+
+  button.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 4px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+
+  button.secondary:hover { border-color: var(--text-muted); color: var(--text); }
+
+  /* ---- Chat area ---- */
+  #chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .message {
+    max-width: 760px;
+    width: 100%;
+  }
+
+  .message.user { margin-left: auto; }
+
+  .message-bubble {
+    padding: 12px 16px;
+    border-radius: 8px;
+    line-height: 1.6;
+    font-size: 0.9rem;
+  }
+
+  .user .message-bubble {
+    background: #1f3a5f;
+    border: 1px solid #2d5a8e;
+    border-radius: 8px 8px 2px 8px;
+  }
+
+  .assistant .message-bubble {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 2px 8px 8px 8px;
+  }
+
+  .message-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    padding: 0 4px;
+  }
+
+  /* ---- Permission gate card ---- */
+  .approval-card {
+    background: var(--card-bg);
+    border: 1px solid var(--yellow);
+    border-radius: 8px;
+    overflow: hidden;
+    max-width: 760px;
+  }
+
+  .approval-card.scan-error { border-color: var(--red); }
+  .approval-card.scan-clean { border-color: var(--green); }
+
+  .card-header {
+    background: rgba(210, 153, 34, 0.1);
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--yellow);
+    border-bottom: 1px solid rgba(210, 153, 34, 0.2);
+  }
+
+  .approval-card.scan-error .card-header {
+    background: rgba(248, 81, 73, 0.1);
+    color: var(--red);
+    border-bottom-color: rgba(248, 81, 73, 0.2);
+  }
+
+  .approval-card.scan-clean .card-header {
+    background: rgba(63, 185, 80, 0.08);
+    color: var(--green);
+    border-bottom-color: rgba(63, 185, 80, 0.2);
+  }
+
+  .card-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+
+  .explanation {
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text);
+  }
+
+  .tool-label {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--purple);
+    margin-bottom: 6px;
+  }
+
+  .code-block {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    color: var(--orange);
+    white-space: pre-wrap;
+    word-break: break-all;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .scan-result {
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 0.82rem;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .scan-result.clean {
+    background: rgba(63, 185, 80, 0.08);
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    color: var(--green);
+  }
+
+  .scan-result.warning {
+    background: rgba(210, 153, 34, 0.08);
+    border: 1px solid rgba(210, 153, 34, 0.3);
+    color: var(--yellow);
+  }
+
+  .scan-result.error {
+    background: rgba(248, 81, 73, 0.08);
+    border: 1px solid rgba(248, 81, 73, 0.3);
+    color: var(--red);
+  }
+
+  .scan-issue { padding-left: 8px; }
+
+  .card-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding-top: 4px;
+  }
+
+  button.approve {
+    background: var(--green);
+    color: #000;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 0.85rem;
+  }
+
+  button.approve:hover { background: #4ac963; }
+
+  button.reject {
+    background: transparent;
+    color: var(--red);
+    border: 1px solid var(--red);
+    padding: 8px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+
+  button.reject:hover { background: rgba(248, 81, 73, 0.1); }
+
+  button.modify {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    padding: 8px 20px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+
+  button.modify:hover { border-color: var(--text-muted); color: var(--text); }
+
+  button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* ---- Result block ---- */
+  .result-block {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    max-width: 760px;
+  }
+
+  .result-header {
+    padding: 8px 16px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .result-header.success { color: var(--green); }
+  .result-header.failure { color: var(--red); }
+
+  .result-output {
+    padding: 12px 16px;
+    font-family: 'Courier New', monospace;
+    font-size: 0.8rem;
+    color: #8b949e;
+    white-space: pre-wrap;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+
+  /* ---- Input area ---- */
+  #input-area {
+    padding: 16px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+  }
+
+  #message-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    padding: 10px 14px;
+    font-size: 0.9rem;
+    resize: none;
+    min-height: 44px;
+    max-height: 200px;
+    font-family: inherit;
+    line-height: 1.5;
+  }
+
+  #message-input:focus {
+    outline: none;
+    border-color: var(--blue);
+  }
+
+  #message-input::placeholder { color: var(--text-muted); }
+
+  #send-btn {
+    background: var(--blue);
+    color: #000;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 0.9rem;
+    height: 44px;
+  }
+
+  #send-btn:hover { background: #79b8ff; }
+  #send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ---- Typing indicator ---- */
+  .typing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 16px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 2px 8px 8px 8px;
+    width: fit-content;
+  }
+
+  .typing span {
+    width: 6px; height: 6px;
+    background: var(--text-muted);
+    border-radius: 50%;
+    animation: bounce 1.2s infinite;
+  }
+
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+
+  @keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); }
+    30% { transform: translateY(-6px); }
+  }
+
+  /* ---- Scrollbar ---- */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="status-dot" id="status-dot"></div>
+  <div class="logo">DevGordon <span>// local DevOps agent</span></div>
+  <div class="header-actions">
+    <button class="secondary" onclick="resetConversation()">New conversation</button>
+  </div>
+</header>
+
+<div id="chat">
+  <!-- Welcome message -->
+  <div class="message assistant">
+    <div class="message-meta">DevGordon</div>
+    <div class="message-bubble">
+      Hey. I can interact with your DevOps stack — Jenkins, Ansible, Kubernetes, Docker.<br><br>
+      I'll <strong>explain what I'm about to do</strong> and show you the exact command or playbook before anything runs. You approve or reject.<br><br>
+      Try: <em>"what pods are running?"</em> or <em>"trigger the build job"</em> or <em>"show me recent Jenkins builds"</em>
+    </div>
+  </div>
+</div>
+
+<div id="input-area">
+  <textarea
+    id="message-input"
+    placeholder="Ask DevGordon to do something..."
+    rows="1"
+    onkeydown="handleKeydown(event)"
+    oninput="autoResize(this)"
+  ></textarea>
+  <button id="send-btn" onclick="sendMessage()">Send</button>
+</div>
+
+<script>
+// ---- State ----
+let isWaiting = false;
+let pendingAction = null;  // Stores the pending tool call for approve/reject
+
+// ---- Core send function ----
+async function sendMessage(overrideText) {
+  const input = document.getElementById('message-input');
+  const text = overrideText || input.value.trim();
+  if (!text || isWaiting) return;
+
+  if (!overrideText) input.value = '';
+  autoResize(input);
+  setWaiting(true);
+
+  appendUserMessage(text);
+  const typingEl = appendTyping();
+
+  try {
+    const resp = await fetch('/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: text})
+    });
+    const data = await resp.json();
+    typingEl.remove();
+
+    if (data.type === 'message') {
+      appendAssistantMessage(data.content);
+    } else if (data.type === 'pending_approval') {
+      pendingAction = data;
+      appendApprovalCard(data);
+    }
+  } catch (err) {
+    typingEl.remove();
+    appendAssistantMessage(`⚠ Error connecting to backend: ${err.message}. Is the server running?`);
+  }
+
+  setWaiting(false);
+}
+
+// ---- Approval actions ----
+async function approveAction(callId) {
+  if (!pendingAction) return;
+  disableCardButtons(callId);
+  appendUserMessage('✓ Approved');
+
+  setWaiting(true);
+  const loadingEl = appendTyping();
+
+  try {
+    const resp = await fetch('/execute', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        tool_name: pendingAction.tool_name,
+        tool_args: pendingAction.tool_args,
+        tool_call_id: callId
+      })
+    });
+    const data = await resp.json();
+    loadingEl.remove();
+    appendResultBlock(data.result);
+
+    // After execution, ask the LLM to interpret the result
+    await sendMessage(`The action completed. Here's what happened: ${JSON.stringify(data.result.output).substring(0, 500)}. Please explain what this output means.`);
+  } catch (err) {
+    loadingEl.remove();
+    appendAssistantMessage(`⚠ Execution error: ${err.message}`);
+  }
+
+  pendingAction = null;
+  setWaiting(false);
+}
+
+async function rejectAction(callId) {
+  disableCardButtons(callId);
+  appendUserMessage('✗ Rejected');
+
+  try {
+    await fetch('/reject', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        tool_name: pendingAction?.tool_name || '',
+        tool_args: pendingAction?.tool_args || {},
+        tool_call_id: callId
+      })
+    });
+    pendingAction = null;
+    await sendMessage('I rejected that. Can you suggest an alternative?');
+  } catch (err) {
+    appendAssistantMessage(`Error: ${err.message}`);
+  }
+}
+
+function modifyAction(callId) {
+  disableCardButtons(callId);
+  const input = document.getElementById('message-input');
+  input.value = "Actually, let's do it differently: ";
+  input.focus();
+  // Move cursor to end
+  input.selectionStart = input.selectionEnd = input.value.length;
+  pendingAction = null;
+}
+
+// ---- DOM helpers ----
+function appendUserMessage(text) {
+  const chat = document.getElementById('chat');
+  const el = document.createElement('div');
+  el.className = 'message user';
+  el.innerHTML = `
+    <div class="message-meta" style="text-align:right">You</div>
+    <div class="message-bubble">${escapeHtml(text)}</div>
+  `;
+  chat.appendChild(el);
+  scrollToBottom();
+}
+
+function appendAssistantMessage(text) {
+  const chat = document.getElementById('chat');
+  const el = document.createElement('div');
+  el.className = 'message assistant';
+  el.innerHTML = `
+    <div class="message-meta">DevGordon</div>
+    <div class="message-bubble">${formatMessage(text)}</div>
+  `;
+  chat.appendChild(el);
+  scrollToBottom();
+  return el;
+}
+
+function appendApprovalCard(data) {
+  const chat = document.getElementById('chat');
+  const scan = data.scan || {status: 'skipped', issues: []};
+  const scanClass = scan.status === 'clean' ? 'scan-clean' :
+                    scan.status === 'error'  ? 'scan-error' : '';
+
+  // Format the args for display
+  const argsDisplay = formatArgsForDisplay(data.tool_name, data.tool_args);
+
+  const scanHtml = scan.status === 'clean'
+    ? `<div class="scan-result clean">✓ Pre-scan passed — no issues found</div>`
+    : scan.status === 'skipped'
+    ? `<div class="scan-result" style="background:rgba(125,133,144,0.1);border:1px solid var(--border);color:var(--text-muted)">⊘ Scan skipped</div>`
+    : `<div class="scan-result ${scan.status}">
+        <strong>${scan.status === 'error' ? '✗ Issues found' : '⚠ Warnings'}</strong>
+        ${scan.issues.map(i => `<div class="scan-issue">• ${escapeHtml(i)}</div>`).join('')}
+       </div>`;
+
+  const el = document.createElement('div');
+  el.className = `approval-card ${scanClass}`;
+  el.id = `card-${data.call_id}`;
+  el.innerHTML = `
+    <div class="card-header">
+      ⚡ Pending approval — <code>${escapeHtml(data.tool_name)}</code>
+    </div>
+    <div class="card-body">
+      ${data.explanation ? `<div class="explanation">${formatMessage(data.explanation)}</div>` : ''}
+      <div>
+        <div class="tool-label">Proposed action</div>
+        <div class="code-block">${escapeHtml(argsDisplay)}</div>
+      </div>
+      ${scanHtml}
+      <div class="card-actions">
+        <button class="approve" onclick="approveAction('${data.call_id}')">✓ Approve</button>
+        <button class="reject" onclick="rejectAction('${data.call_id}')">✗ Reject</button>
+        <button class="modify" onclick="modifyAction('${data.call_id}')">✎ Ask to modify</button>
+      </div>
+    </div>
+  `;
+  chat.appendChild(el);
+  scrollToBottom();
+}
+
+function appendResultBlock(result) {
+  const chat = document.getElementById('chat');
+  const el = document.createElement('div');
+  el.className = 'result-block';
+  const headerClass = result.success ? 'success' : 'failure';
+  const icon = result.success ? '✓' : '✗';
+  const label = result.success ? 'Execution successful' : 'Execution failed';
+  el.innerHTML = `
+    <div class="result-header ${headerClass}">${icon} ${label}</div>
+    <div class="result-output">${escapeHtml(result.output || '(no output)')}</div>
+  `;
+  chat.appendChild(el);
+  scrollToBottom();
+}
+
+function appendTyping() {
+  const chat = document.getElementById('chat');
+  const el = document.createElement('div');
+  el.className = 'message assistant';
+  el.innerHTML = `
+    <div class="message-meta">DevGordon</div>
+    <div class="typing"><span></span><span></span><span></span></div>
+  `;
+  chat.appendChild(el);
+  scrollToBottom();
+  return el;
+}
+
+function disableCardButtons(callId) {
+  const card = document.getElementById(`card-${callId}`);
+  if (!card) return;
+  card.querySelectorAll('button').forEach(b => b.disabled = true);
+}
+
+// ---- Utilities ----
+function formatArgsForDisplay(toolName, args) {
+  // Make args readable for each tool type
+  if (toolName === 'run_ansible_playbook') {
+    return args.playbook_content || JSON.stringify(args, null, 2);
+  } else if (toolName === 'kubectl_command') {
+    return `kubectl ${args.command}${args.namespace ? ' -n ' + args.namespace : ''}`;
+  } else if (toolName === 'docker_operation') {
+    return `docker ${args.operation} ${args.args || ''}`.trim();
+  } else if (toolName === 'trigger_jenkins_job') {
+    const params = Object.keys(args.parameters || {}).length > 0
+      ? `\nParameters: ${JSON.stringify(args.parameters)}` : '';
+    return `Trigger Jenkins job: "${args.job_name}"${params}`;
+  }
+  return JSON.stringify(args, null, 2);
+}
+
+function formatMessage(text) {
+  if (!text) return '';
+  // Convert backtick code to styled spans
+  return escapeHtml(text)
+    .replace(/`([^`]+)`/g, '<code style="background:#0d1117;padding:2px 6px;border-radius:4px;font-family:monospace;color:var(--orange)">$1</code>')
+    .replace(/\n/g, '<br>');
+}
+
+function escapeHtml(text) {
+  if (typeof text !== 'string') text = String(text);
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function setWaiting(val) {
+  isWaiting = val;
+  document.getElementById('send-btn').disabled = val;
+}
+
+function scrollToBottom() {
+  const chat = document.getElementById('chat');
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+
+function handleKeydown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+async function resetConversation() {
+  await fetch('/reset', {method: 'POST'});
+  document.getElementById('chat').innerHTML = `
+    <div class="message assistant">
+      <div class="message-meta">DevGordon</div>
+      <div class="message-bubble">Conversation cleared. What do you need?</div>
+    </div>
+  `;
+  pendingAction = null;
+}
+
+// ---- Check backend connection on load ----
+window.addEventListener('load', async () => {
+  try {
+    const resp = await fetch('/history');
+    if (!resp.ok) throw new Error();
+    document.getElementById('status-dot').style.background = 'var(--green)';
+  } catch {
+    document.getElementById('status-dot').style.background = 'var(--red)';
+    document.getElementById('status-dot').style.animation = 'none';
+    appendAssistantMessage('⚠ Cannot reach backend. Make sure the FastAPI server is running on port 8000.');
+  }
+});
+</script>
+</body>
+</html>

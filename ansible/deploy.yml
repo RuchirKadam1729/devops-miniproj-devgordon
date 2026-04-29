@@ -1,0 +1,69 @@
+---
+# ---- ansible/deploy.yml ----
+# Deploys DevGordon to Kubernetes (Minikube)
+#
+# What Ansible adds over raw kubectl:
+#   - Idempotent: safe to run multiple times, same result
+#   - Variables: the image_tag gets substituted in the manifest
+#   - Checks: verifies the deployment actually came up
+#   - Single source of truth for deploy steps
+#
+# Run manually: ansible-playbook deploy.yml -i inventory.ini --extra-vars "image_tag=42"
+# Run from Jenkins: Jenkins calls this in the 'Ansible Deploy' stage
+
+- name: Deploy DevGordon to Kubernetes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # These are defaults — override with --extra-vars when calling from Jenkins
+    image_tag: "latest"
+    app_name: "devgordon"
+    namespace: "devgordon"
+    replicas: 1
+
+  tasks:
+
+    - name: Ensure devgordon namespace exists
+      # kubectl apply is idempotent — won't fail if it already exists
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ namespace }}"
+      # Fallback using shell if kubernetes.core isn't installed:
+      # shell: kubectl get namespace {{ namespace }} || kubectl create namespace {{ namespace }}
+
+    - name: Apply Kubernetes deployment manifest
+      # Uses the template in k8s/deployment.yaml, substituting image_tag
+      kubernetes.core.k8s:
+        state: present
+        template: "../k8s/deployment.yaml"
+      vars:
+        deploy_image_tag: "{{ image_tag }}"
+
+    - name: Apply Kubernetes service manifest
+      kubernetes.core.k8s:
+        state: present
+        src: "../k8s/service.yaml"
+
+    - name: Wait for deployment to be ready
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: "{{ app_name }}"
+        namespace: "{{ namespace }}"
+        wait: true
+        wait_condition:
+          type: Available
+          status: "True"
+        wait_timeout: 120
+      register: deploy_info
+
+    - name: Report deployment status
+      debug:
+        msg: >
+          Deployment '{{ app_name }}' is ready.
+          Replicas: {{ deploy_info.resources[0].status.readyReplicas | default(0) }}/{{ replicas }}
