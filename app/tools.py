@@ -299,6 +299,38 @@ def _trigger_jenkins(args: dict) -> dict:
     except requests.exceptions.ConnectionError:
         return {"success": False, "output": f"Cannot connect to Jenkins at {JENKINS_URL}. Is it running?"}
 
+def _get_kube_server():
+    """
+    Auto-detect if kubeconfig points to 127.0.0.1 and rewrite to
+    host.docker.internal so kubectl can reach the host K8s API from
+    inside the container. KUBE_API_SERVER env var overrides everything.
+    """
+    # Explicit override always wins
+    explicit = os.getenv("KUBE_API_SERVER", "").strip()
+    if explicit:
+        return explicit, True
+
+    # Auto-detect from kubeconfig
+    try:
+        import yaml
+        kubeconfig = os.getenv("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+        with open(kubeconfig) as f:
+            cfg = yaml.safe_load(f)
+
+        current_context = cfg.get("current-context", "")
+        ctx = next((c["context"] for c in cfg.get("contexts", []) 
+                    if c["name"] == current_context), {})
+        cluster_name = ctx.get("cluster", "")
+        cluster = next((c["cluster"] for c in cfg.get("clusters", []) 
+                        if c["name"] == cluster_name), {})
+        server = cluster.get("server", "")
+
+        if "127.0.0.1" in server:
+            return server.replace("127.0.0.1", "host.docker.internal"), True
+    except Exception:
+        pass
+
+    return None, False
 
 def _kubectl(args: dict) -> dict:
     """Run a kubectl command. Namespace is injected if not already in the command."""
@@ -309,9 +341,9 @@ def _kubectl(args: dict) -> dict:
     destructive = ["delete", "drain", "cordon"]
     cmd_parts = command.split()
 
-    server_override = os.getenv("KUBE_API_SERVER")
-    if server_override:
-        full_cmd = ["kubectl", f"--server={server_override}", "--insecure-skip-tls-verify"] + cmd_parts
+    server, needs_override = _get_kube_server()
+    if needs_override:
+        full_cmd = ["kubectl", f"--server={server}", "--insecure-skip-tls-verify"] + cmd_parts
     else:
         full_cmd = ["kubectl"] + cmd_parts
 
