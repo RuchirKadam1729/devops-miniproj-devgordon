@@ -29,10 +29,10 @@ STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Configuration — read from environment variables (set in .env or docker-compose.yml)
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_URL = os.getenv("OLLAMA_URL")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
-JENKINS_URL = os.getenv("JENKINS_URL", "http://localhost:8080")
-SONAR_URL = os.getenv("SONAR_URL", "http://localhost:9000")
+JENKINS_URL = os.getenv("JENKINS_URL")
+SONAR_URL = os.getenv("SONAR_URL")
 
 # ---- Approval mode ----
 # "always" → approval card for every tool call (default)

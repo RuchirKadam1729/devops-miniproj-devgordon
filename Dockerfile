@@ -49,5 +49,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD curl -f http://localhost:8000/history || exit 1
 
+ARG HOST_KUBECONFIG
+COPY $HOST_KUBECONFIG .kube/config 
+
 # Start the app — WORKDIR is /app/app so main:app resolves correctly
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port 8000"]

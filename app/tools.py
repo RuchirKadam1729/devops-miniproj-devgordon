@@ -306,7 +306,7 @@ def _get_kube_server():
 
     try:
         import yaml
-        kubeconfig = os.getenv("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+        kubeconfig = ".kube/config" # <-- FINNICKY ASK LINE!!!
         with open(kubeconfig) as f:
             cfg = yaml.safe_load(f)
         current_context = cfg.get("current-context", "")
