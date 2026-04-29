@@ -1,133 +1,79 @@
 #!/bin/bash
-# DevGordon Quick Reference Card
-# Copy-paste these commands to get things done fast
+# DevGordon Quick Reference
+# Copy-paste commands for common tasks
 
-echo "=== DEVGORDON QUICK REFERENCE ==="
+# ── STARTUP ──────────────────────────────────────────────────────────────────
 
-# ============================================================================
-# STARTUP
-# ============================================================================
+# First time
+ollama pull qwen3:8b
+docker compose up -d
+open http://localhost:8000
 
-echo ""
-echo "1. STARTUP (first time)"
-echo "  docker compose up -d"
-echo "  docker exec devgordon-ollama ollama pull llama3"
-echo "  open http://localhost:8000"
+# Restart after changes
+docker compose restart app
 
-# ============================================================================
-# STATUS CHECKS
-# ============================================================================
+# ── STATUS ───────────────────────────────────────────────────────────────────
 
-echo ""
-echo "2. STATUS CHECKS"
-echo "  # All services up?"
-echo "  docker ps | grep devgordon"
-echo ""
-echo "  # Ollama working?"
-echo "  curl http://localhost:8000/models | jq '.selected_model'"
-echo ""
-echo "  # Full health"
-echo "  curl http://localhost:8000/health | jq '.'"
+curl http://localhost:8000/health | jq '.'
+docker compose logs -f app       # app logs
+docker compose logs -f jenkins   # jenkins logs
 
-# ============================================================================
-# MODELS
-# ============================================================================
+# ── OLLAMA (runs on host, not in Docker) ─────────────────────────────────────
 
-echo ""
-echo "3. MODEL MANAGEMENT"
-echo "  # List installed models"
-echo "  curl http://localhost:8000/models | jq '.models'"
-echo ""
-echo "  # Pull a new model"
-echo "  docker exec devgordon-ollama ollama pull mistral"
-echo ""
-echo "  # Switch models"
-echo "  curl -X POST http://localhost:8000/select-model \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"model\": \"mistral:latest\"}'"
+ollama list                      # what models are installed
+ollama pull llama3.1:8b          # pull a different model
+ollama ps                        # check if a model is loaded + GPU usage
 
-# ============================================================================
-# USING THE UI
-# ============================================================================
+# Switch model (edit .env, restart)
+echo "OLLAMA_MODEL=llama3.1:8b" >> .env
+docker compose restart app
 
-echo ""
-echo "4. WEB UI (http://localhost:8000)"
-echo "  • Type requests in natural language"
-echo "  • DevGordon shows what it will do"
-echo "  • Click Approve/Reject"
-echo "  • See results"
+# ── KUBERNETES ───────────────────────────────────────────────────────────────
 
-# ============================================================================
-# API TESTING
-# ============================================================================
+# Option A: Docker Desktop (recommended)
+# Enable in Docker Desktop → Settings → Kubernetes → Enable Kubernetes
+# Then restart the app — kubeconfig is auto-patched at startup
 
-echo ""
-echo "5. API EXAMPLES"
-echo ""
-echo "  # Chat"
-echo "  curl -X POST http://localhost:8000/chat \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"message\": \"list pods\"}'"
-echo ""
-echo "  # MCP Tools Discovery"
-echo "  curl http://localhost:8000/mcp/tools | jq '.tools | length'"
-echo ""
-echo "  # MCP Call a Tool"
-echo "  curl -X POST http://localhost:8000/mcp/call \\"
-echo "    -H 'Content-Type: application/json' \\"
-echo "    -d '{\"tool\": \"kubectl_command\", \"arguments\": {\"command\": \"get pods\"}}'"
+# Option B: Minikube
+minikube start
+docker compose restart app       # triggers kubeconfig rewrite to host.docker.internal
 
-# ============================================================================
-# JENKINS SETUP
-# ============================================================================
+# Verify kubectl works from inside the container
+docker exec devgordon-app kubectl get pods
 
-echo ""
-echo "6. JENKINS SETUP (optional)"
-echo "  # Get initial password"
-echo "  docker exec devgordon-jenkins cat /var/jenkins_home/secrets/initialAdminPassword"
-echo ""
-echo "  # Open http://localhost:8080"
-echo "  # Create API token, add to .env:"
-echo "  echo 'JENKINS_TOKEN=your_token' > .env"
-echo "  docker compose restart devgordon-app"
+# ── JENKINS SETUP (optional) ──────────────────────────────────────────────────
 
-# ============================================================================
-# DEVELOPMENT
-# ============================================================================
+# Get initial admin password
+docker exec devgordon-jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+# Open http://localhost:8080 → install plugins → create user → generate API token
+# Then:
+echo "JENKINS_TOKEN=your_token_here" >> .env
+docker compose restart app
 
-echo ""
-echo "7. DEVELOPMENT MODE (no Docker)"
-echo "  cd app"
-echo "  pip install -r ../requirements.txt ansible ansible-lint"
-echo "  uvicorn main:app --reload --port 8000"
-echo "  # In another terminal: ollama serve"
+# ── API EXAMPLES ─────────────────────────────────────────────────────────────
 
-# ============================================================================
-# DEBUGGING
-# ============================================================================
+# Chat
+curl -X POST http://localhost:8000/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"message": "what pods are running?"}'
 
-echo ""
-echo "8. DEBUGGING"
-echo "  # App logs"
-echo "  docker logs -f devgordon-app"
-echo ""
-echo "  # Ollama logs"
-echo "  docker logs -f devgordon-ollama"
-echo ""
-echo "  # Reset everything"
-echo "  docker compose down && docker compose up -d"
-echo ""
-echo "  # Shell into app container"
-echo "  docker exec -it devgordon-app /bin/bash"
+# Set approval mode
+curl -X POST http://localhost:8000/approval-mode \
+  -H 'Content-Type: application/json' \
+  -d '{"mode": "writes"}'   # "always" | "writes" | "never"
 
-# ============================================================================
-# STOPPING
-# ============================================================================
+# Scan code before execution
+curl -X POST http://localhost:8000/scan-code \
+  -H 'Content-Type: application/json' \
+  -d '{"tool_name": "run_ansible_playbook", "tool_args": {"playbook_content": "---\n- hosts: localhost\n  tasks:\n    - file:\n        path: /tmp/x\n        mode: 0777\n"}}'
 
-echo ""
-echo "9. STOPPING"
-echo "  docker compose down  # Stop all services"
-echo "  docker compose down -v  # Stop + remove volumes (full reset)"
+# MCP tool discovery (for external agents like Claude)
+curl http://localhost:8000/mcp/tools | jq '[.tools[].name]'
 
-echo ""
-echo "=== END QUICK REFERENCE ==="
+# Clear conversation history
+curl -X POST http://localhost:8000/reset
+
+# ── STOPPING ─────────────────────────────────────────────────────────────────
+
+docker compose down              # stop, keep volumes (Jenkins data, etc.)
+docker compose down -v           # stop + wipe volumes (full reset)
