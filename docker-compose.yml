@@ -31,21 +31,17 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # ---- Local infrastructure ----
-      OLLAMA_URL: http://host.docker.internal:11434 #rn set to host container IP
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b} # Override with env var
+      OLLAMA_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
       JENKINS_URL: http://jenkins:8080
       JENKINS_USER: admin
       JENKINS_TOKEN: ${JENKINS_TOKEN:-}
       SONAR_URL: http://sonarqube:9000
       SONAR_TOKEN: ${SONAR_TOKEN:-}
-    # depends_on:
-    #   ollama:
-    #     condition: service_healthy
+      KUBECONFIG: /home/devgordon/.kube/config
+      KUBE_API_SERVER: ${KUBE_API_SERVER:-}
     volumes:
-      - ${HOME}/.kube:/home/devgordon/.kube:ro
-      - ${HOME}/.minikube:/home/devgordon/.minikube:ro
-      - ~/.kube:/root/.kube:ro
+      - ${HOST_KUBECONFIG:-~/.kube/config}:/home/devgordon/.kube/config:ro
     networks:
       - devgordon-net
     restart: unless-stopped

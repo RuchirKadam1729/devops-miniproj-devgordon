@@ -309,7 +309,11 @@ def _kubectl(args: dict) -> dict:
     destructive = ["delete", "drain", "cordon"]
     cmd_parts = command.split()
 
-    full_cmd = ["kubectl"] + cmd_parts
+    server_override = os.getenv("KUBE_API_SERVER")
+    if server_override:
+        full_cmd = ["kubectl", f"--server={server_override}", "--insecure-skip-tls-verify"] + cmd_parts
+    else:
+        full_cmd = ["kubectl"] + cmd_parts
 
     # Add namespace flag if not already present and command supports it
     ns_supporting = ["get", "describe", "logs", "delete", "apply", "rollout", "scale"]
