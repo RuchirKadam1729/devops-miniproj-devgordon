@@ -45,6 +45,7 @@ services:
     volumes:
       - ${HOME}/.kube:/home/devgordon/.kube:ro
       - ${HOME}/.minikube:/home/devgordon/.minikube:ro
+      - ~/.kube:/root/.kube:ro
     networks:
       - devgordon-net
     restart: unless-stopped

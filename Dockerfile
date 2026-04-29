@@ -45,7 +45,6 @@ USER devgordon
 
 # Expose port 8000 (FastAPI default)
 EXPOSE 8000
-
 # Health check — Docker will mark the container unhealthy if this fails
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD curl -f http://localhost:8000/history || exit 1
