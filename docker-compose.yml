@@ -1,26 +1,3 @@
-# ---- DevGordon docker-compose.yml ----
-# Run the entire stack: docker compose up -d
-#
-# Services:
-#   app        — FastAPI backend + web UI (port 8000) — uses Ollama for all reasoning
-#   ollama     — Local LLM server with tool calling (port 11434)
-#   sonarqube  — Code quality scanning in CI/CD pipeline (port 9000)
-#   jenkins    — CI/CD server (port 8080)
-#
-# First time setup:
-#   1. docker compose up -d
-#   2. ./scripts/pull-ollama-model.sh qwen3:8b   (pull model, ~5-10 min)
-#   3. Open http://localhost:8000
-#
-# To use a different model:
-#   ./scripts/pull-ollama-model.sh llama3.1:8b
-#   Or change via the web UI: /select-model
-#
-# Model persists in the ollama_models Docker volume:
-# - First pull: downloads model (~5-10 min)
-# - Subsequent runs: instant, model loaded from volume
-# - Switching models: pull again with different name
-
 services:
 
   app:
@@ -106,7 +83,6 @@ services:
     # sudo sysctl -w vm.max_map_count=524288
 
 volumes:
-  ollama_models:
   jenkins_home:
   sonarqube_data:
   sonarqube_logs:
