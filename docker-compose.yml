@@ -1,21 +1,21 @@
 services:
-
   app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: devgordon-app
     ports:
       - "8000:8000"
-    env_file: 
+    env_file:
       - .env
     networks:
       - devgordon-net
     restart: unless-stopped
-
+    volumes:
+      - ~/.kube/config:/.kube/config:ro
+    environment:
+      - KUBECONFIG=/home/devgordon/.kube/config
   jenkins:
     image: jenkins/jenkins:lts-jdk17
-    container_name: devgordon-jenkins
     ports:
       - "8080:8080"
       - "50000:50000"
@@ -30,7 +30,6 @@ services:
 
   sonarqube:
     image: sonarqube:10-community
-    container_name: devgordon-sonarqube
     ports:
       - "9000:9000"
     environment:

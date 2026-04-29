@@ -8,12 +8,18 @@ FROM python:3.11-slim
 # ansible and ansible-lint: needed to actually run playbooks and scan them
 # kubectl: installed separately below (not in apt)
 # curl: needed to download kubectl
+# System packages - cached unless this changes
 RUN apt-get update && apt-get install -y \
     ansible \
     curl \
-    && pip install ansible-lint --quiet \
-    && ansible-galaxy collection install kubernetes.core \
+    ruby-full \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Pip tools - separate layer
+RUN pip install ansible-lint --quiet
+
+# Ansible collections - separate layer  
+RUN ansible-galaxy collection install kubernetes.core
 
 # Install kubectl (latest stable)
 # This is what lets DevGordon run kubectl commands against your cluster
@@ -41,6 +47,7 @@ COPY . .
 WORKDIR /app/app
 
 # Switch to non-root user
+RUN chown -R devgordon:devgordon /app
 USER devgordon
 
 # Expose port 8000 (FastAPI default)
@@ -49,8 +56,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD curl -f http://localhost:8000/history || exit 1
 
-ARG HOST_KUBECONFIG
-COPY $HOST_KUBECONFIG .kube/config 
-
 # Start the app — WORKDIR is /app/app so main:app resolves correctly
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "ruby kube_config_copyover.rb && uvicorn main:app --host 0.0.0.0 --port 8000"]
