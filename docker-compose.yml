@@ -7,49 +7,9 @@ services:
     container_name: devgordon-app
     ports:
       - "8000:8000"
-    environment:
-      OLLAMA_URL: http://host.docker.internal:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
-      JENKINS_URL: http://jenkins:8080
-      JENKINS_USER: admin
-      JENKINS_TOKEN: ${JENKINS_TOKEN:-}
-      SONAR_URL: http://sonarqube:9000
-      SONAR_TOKEN: ${SONAR_TOKEN:-}
-      KUBECONFIG: /home/devgordon/.kube/config
-      KUBE_API_SERVER: ${KUBE_API_SERVER:-}
-    volumes:
-      - ${HOST_KUBECONFIG:-~/.kube/config}:/home/devgordon/.kube/config:ro
     networks:
       - devgordon-net
     restart: unless-stopped
-
-  # optional ollama container (only cpu)
-  # ollama:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.ollama
-  #   container_name: devgordon-ollama
-  #   ports:
-  #     - "11434:11434"
-  #   volumes:
-  #     # Persist downloaded models — no re-download on restart
-  #     - ollama_models:/root/.ollama
-  #   networks:
-  #     - devgordon-net
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "ollama list > /dev/null 2>&1"]
-  #     interval: 5s
-  #     timeout: 5s
-  #     retries: 120
-  #   # GPU support (uncomment if available):
-  #   # deploy:
-  #   #   resources:
-  #   #     reservations:
-  #   #       devices:
-  #   #         - driver: nvidia
-  #   #           count: 1
-  #   #           capabilities: [gpu]
 
   jenkins:
     image: jenkins/jenkins:lts-jdk17

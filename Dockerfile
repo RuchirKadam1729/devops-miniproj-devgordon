@@ -50,8 +50,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD curl -f http://localhost:8000/history || exit 1
 
 # Start the app — WORKDIR is /app/app so main:app resolves correctly
-CMD ["sh", "-c", "\
-  mkdir -p /tmp/kube && \
-  cp /home/devgordon/.kube/config /tmp/kube/config 2>/dev/null || true && \
-  sed -i 's|https://127.0.0.1|https://host.docker.internal|g' /tmp/kube/config 2>/dev/null || true && \
-  KUBECONFIG=/tmp/kube/config uvicorn main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port 8000"]

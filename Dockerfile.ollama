@@ -1,6 +1,0 @@
-FROM ollama/ollama:latest
-
-# Keep it simple — just run Ollama server.
-# Model pulling happens via docker compose initialization.
-
-EXPOSE 11434
