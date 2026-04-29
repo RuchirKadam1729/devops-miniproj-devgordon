@@ -94,7 +94,8 @@ Tool routing:
 - Container listing / logs / images → docker_operation
 
 IMPORTANT: You never execute without user approval. Calling a tool triggers an approval
-card in the UI — the user sees the command, the security scan result, and approves/rejects."""
+card in the UI — the user sees the command, the security scan result, and approves/rejects.
+UNLESS the specific option about allowing is toggled"""
 
 
 # ---- Ollama chat with tool calling ----
