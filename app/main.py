@@ -95,15 +95,22 @@ async def _call_ollama(messages: list[dict]) -> dict:
         for t in TOOL_DEFINITIONS
     ]
 
+    # Prepend system prompt if not already present
+    if not messages or messages[0].get("role") != "system":
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
+
     payload = {
         "model": OLLAMA_MODEL,
         "messages": messages,
         "tools": tools,
         "stream": False,
+        # Disable qwen3 extended thinking — on CPU it burns the full timeout
+        # before producing a response. Plain tool-call answers need no CoT.
+        "options": {"think": False},
     }
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=120) as client:
             resp = await client.post(
                 f"{OLLAMA_URL}/api/chat",
                 json=payload,
@@ -114,6 +121,8 @@ async def _call_ollama(messages: list[dict]) -> dict:
             return resp.json()
     except httpx.ConnectError:
         raise HTTPException(503, f"Cannot connect to Ollama at {OLLAMA_URL}. Is it running?")
+    except httpx.ReadTimeout:
+        raise HTTPException(503, f"Ollama timed out — model is too slow. Try: ollama pull llama3.1:8b")
     except HTTPException:
         raise
     except Exception as e:
@@ -245,11 +254,15 @@ async def chat(msg: ChatMessage):
         func = tool_call.get("function", {})
         tool_name = func.get("name", "")
         
-        # Arguments come as JSON string, parse them
-        try:
-            tool_args = json.loads(func.get("arguments", "{}"))
-        except (json.JSONDecodeError, TypeError):
-            tool_args = {}
+        # Ollama returns arguments as a dict directly (not a JSON string like OpenAI)
+        raw_args = func.get("arguments", {})
+        if isinstance(raw_args, str):
+            try:
+                tool_args = json.loads(raw_args)
+            except (json.JSONDecodeError, TypeError):
+                tool_args = {}
+        else:
+            tool_args = raw_args or {}
 
         explanation = text or f"Running {tool_name} to fulfil your request."
 
@@ -313,13 +326,10 @@ async def execute(body: dict):
 
     # Append tool_result turn to history so Claude has context
     output_snippet = str(result.get("output", ""))[:2000]
+    # Ollama expects tool results as role="tool" with plain string content
     _conversation_history.append({
-        "role": "user",
-        "content": [{
-            "type": "tool_result",
-            "tool_use_id": tool_call_id,
-            "content": output_snippet,
-        }],
+        "role": "tool",
+        "content": output_snippet,
     })
 
     # Ask Ollama to interpret (no tools on this call — just a text reply)
@@ -362,13 +372,10 @@ async def reject(body: dict):
     tool_call_id = body.get("tool_call_id", "")
 
     if tool_call_id:
+        # Ollama expects tool results as role="tool" with plain string content
         _conversation_history.append({
-            "role": "user",
-            "content": [{
-                "type": "tool_result",
-                "tool_use_id": tool_call_id,
-                "content": "User rejected this action. Do not retry it.",
-            }],
+            "role": "tool",
+            "content": "User rejected this action. Do not retry it.",
         })
 
     # Ask Ollama what to suggest instead (no tools — just a text reply)
