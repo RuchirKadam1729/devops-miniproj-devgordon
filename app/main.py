@@ -34,6 +34,33 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 JENKINS_URL = os.getenv("JENKINS_URL", "http://localhost:8080")
 SONAR_URL = os.getenv("SONAR_URL", "http://localhost:9000")
 
+# ---- Approval mode ----
+# "always" → approval card for every tool call (default)
+# "writes" → auto-execute read-only tools, card only for write operations
+# "never"  → auto-execute everything, no approval cards
+_approval_mode: str = "always"
+
+# Tools that are purely read-only (no side-effects) when used correctly
+READ_ONLY_TOOLS = {"kubectl_command", "jenkins_status", "docker_operation"}
+
+# Subcommand prefixes that make an otherwise read-only tool a write operation
+WRITE_PREFIXES = {
+    "kubectl_command": ("apply","delete","create","patch","scale","rollout","exec","cp","port-forward","drain","cordon","taint","label","annotate"),
+    "docker_operation": ("run","stop","rm","rmi","pull","push","build","exec","kill","start","restart","rename","update"),
+}
+
+def _is_read_only(tool_name: str, tool_args: dict) -> bool:
+    if tool_name not in READ_ONLY_TOOLS:
+        return False
+    write_prefixes = WRITE_PREFIXES.get(tool_name, ())
+    if write_prefixes:
+        cmd = tool_args.get("command", tool_args.get("operation", ""))
+        first = cmd.strip().split()[0].lower() if cmd.strip() else ""
+        if first in write_prefixes:
+            return False
+    return True
+
+
 # ---- In-memory conversation history ----
 _conversation_history: list[dict] = []
 
@@ -157,6 +184,21 @@ async def reset_conversation():
     return {"status": "cleared"}
 
 
+@app.get("/approval-mode")
+async def get_approval_mode():
+    return {"mode": _approval_mode}
+
+
+@app.post("/approval-mode")
+async def set_approval_mode(body: dict):
+    global _approval_mode
+    mode = body.get("mode", "")
+    if mode not in ("always", "writes", "never"):
+        raise HTTPException(400, "mode must be 'always', 'writes', or 'never'")
+    _approval_mode = mode
+    return {"mode": _approval_mode}
+
+
 @app.get("/health")
 async def health():
     # Check Ollama and list available models
@@ -276,6 +318,44 @@ async def chat(msg: ChatMessage):
         # Pre-execution security scan
         from scanner import pre_scan
         scan_result = pre_scan(tool_name, tool_args)
+
+        # Decide whether to show an approval card or auto-execute
+        needs_card = True
+        if _approval_mode == "never":
+            needs_card = False
+        elif _approval_mode == "writes" and _is_read_only(tool_name, tool_args):
+            needs_card = False
+
+        if not needs_card:
+            # Auto-execute — no card shown
+            from tools import execute_tool
+            result = execute_tool(tool_name, tool_args)
+            output_snippet = str(result.get("output", ""))[:2000]
+            _conversation_history.append({"role": "tool", "content": output_snippet})
+            # Ask Ollama to interpret
+            interpretation = ""
+            try:
+                async with httpx.AsyncClient(timeout=120) as client:
+                    ir = await client.post(f"{OLLAMA_URL}/api/chat", json={
+                        "model": OLLAMA_MODEL,
+                        "messages": list(_conversation_history),
+                        "stream": False,
+                        "options": {"think": False},
+                    })
+                    if ir.status_code == 200:
+                        interpretation = ir.json().get("message", {}).get("content", "")
+                        if interpretation:
+                            _conversation_history.append({"role": "assistant", "content": interpretation})
+            except Exception:
+                pass
+            return {
+                "type": "auto_executed",
+                "tool_name": tool_name,
+                "tool_args": tool_args,
+                "result": result,
+                "interpretation": interpretation or explanation,
+                "model_used": OLLAMA_MODEL,
+            }
 
         return {
             "type": "pending_approval",
