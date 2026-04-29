@@ -40,25 +40,7 @@ docker compose restart app
 
 ## Kubernetes Setup
 
-DevGordon runs kubectl inside the app container, so it needs a kubeconfig that points to somewhere reachable from inside Docker — not `127.0.0.1` (which is the container itself).
-
-The Dockerfile handles this automatically at startup: it copies your kubeconfig to `/tmp/kube/config` and rewrites `127.0.0.1` → `host.docker.internal`, then sets `KUBECONFIG` to point there. Your original `~/.kube/config` is mounted read-only and never modified.
-
-**Option A — Docker Desktop built-in Kubernetes (recommended)**
-
-Enable it in Docker Desktop → Settings → Kubernetes → Enable Kubernetes. No minikube needed. The kubeconfig it generates already uses `kubernetes.docker.internal` so the rewrite is a no-op.
-
-**Option B — Minikube**
-
-```bash
-minikube start
-# The Dockerfile startup script handles the 127.0.0.1 → host.docker.internal rewrite
-```
-
-**Make it work without any K8s**
-
-If you don't need kubectl at all, just ignore it. The rest of DevGordon (Jenkins, Docker, Ansible, chat) works fine without a cluster. Set `KUBECONFIG_AVAILABLE=false` in `.env` to suppress kubectl errors.
-
+todo: write this shit
 ---
 
 ## Approval Modes
