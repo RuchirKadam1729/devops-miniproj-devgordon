@@ -1,18 +1,6 @@
-"""
-main.py — DevGordon FastAPI backend
-=====================================
-Architecture:
-  - Ollama (local, tool-capable) handles reasoning + tool selection
-  - qwen3:8b or llama3.1:8b — full function calling support, no external APIs
-  - All infrastructure execution (kubectl, ansible, jenkins, docker) runs locally
-  - Pre-scan via scanner.py before every approval card
-  - Full agentic loop: user → Ollama → tool_call → scan → approve → execute → interpret
-"""
-
 import os
-import json
+import uuid
 from pathlib import Path
-from dotenv import load_dotenv
 
 import httpx
 from fastapi import FastAPI, HTTPException
@@ -20,151 +8,273 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Load environment variables from .env file (if present)
-load_dotenv()
-
-app = FastAPI(title="DevGordon", version="2.0.0")
+app = FastAPI(title="DevGordon", version="0.1.0")
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# Configuration — read from environment variables (set in .env or docker-compose.yml)
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 JENKINS_URL = os.getenv("JENKINS_URL", "http://localhost:8080")
 SONAR_URL = os.getenv("SONAR_URL", "http://localhost:9000")
 
-# ---- Approval mode ----
-# "always" → approval card for every tool call (default)
-# "writes" → auto-execute read-only tools, card only for write operations
-# "never"  → auto-execute everything, no approval cards
-_approval_mode: str = "always"
 
-# Tools that are purely read-only (no side-effects) when used correctly
-READ_ONLY_TOOLS = {"kubectl_command", "jenkins_status", "docker_operation"}
-
-# Subcommand prefixes that make an otherwise read-only tool a write operation
-WRITE_PREFIXES = {
-    "kubectl_command": ("apply","delete","create","patch","scale","rollout","exec","cp","port-forward","drain","cordon","taint","label","annotate"),
-    "docker_operation": ("run","stop","rm","rmi","pull","push","build","exec","kill","start","restart","rename","update"),
-}
-
-def _is_read_only(tool_name: str, tool_args: dict) -> bool:
-    if tool_name not in READ_ONLY_TOOLS:
-        return False
-    write_prefixes = WRITE_PREFIXES.get(tool_name, ())
-    if write_prefixes:
-        cmd = tool_args.get("command", tool_args.get("operation", ""))
-        first = cmd.strip().split()[0].lower() if cmd.strip() else ""
-        if first in write_prefixes:
-            return False
-    return True
-
-
-# ---- In-memory conversation history ----
+# ---- In-memory conversation history + selected model ----
 _conversation_history: list[dict] = []
+_selected_model: str = ""
 
+# ---- Request models ----
 
-# ---- Pydantic models ----
 class ChatMessage(BaseModel):
     message: str
     history: list[dict] = []
 
 
-# ---- System prompt ----
-SYSTEM_PROMPT = """You are DevGordon, a conversational DevOps assistant running in a local lab.
+# ---- Tool definitions (passed to Ollama on every /chat so it can call them) ----
+# IMPORTANT: Descriptions are read by the LLM to decide WHEN and HOW to call a tool.
+# Vague descriptions = bad tool selection.
 
-Your stack:
-- Kubernetes (Minikube) — container orchestration
-- Docker — containerization
-- Jenkins — CI/CD pipelines
-- Ansible — infrastructure automation
-- SonarQube — code quality analysis
-
-Your behaviour:
-1. Answer questions directly when no tool is needed.
-2. Call tools whenever the user wants something actually DONE on the infrastructure.
-3. Before calling a tool, write ONE short sentence explaining what you're about to do.
-4. Be terse. Terminal-style. No fluff, no filler.
-
-Tool routing:
-- Kubernetes questions / pod status / deployments → kubectl_command
-- Infrastructure config / package install / service management → run_ansible_playbook
-- Build / deploy / pipeline status → trigger_jenkins_job or jenkins_status
-- Container listing / logs / images → docker_operation
-
-IMPORTANT: You never execute without user approval. Calling a tool triggers an approval
-card in the UI — the user sees the command, the security scan result, and approves/rejects."""
-
-
-# ---- Ollama chat with tool calling ----
-async def _call_ollama(messages: list[dict]) -> dict:
-    """
-    Call Ollama /api/chat endpoint with tool calling.
-    Messages format: [{"role": "user/assistant", "content": "..."}]
-    Returns: {"message": {"content": "...", "tool_calls": [...]}, "done": bool}
-    
-    Raises:
-        HTTPException: 503 if Ollama is unavailable or returns error
-    """
-    from tools import TOOL_DEFINITIONS
-
-    # Convert tool definitions to OpenAI/Ollama format
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": t["function"]["name"],
-                "description": t["function"]["description"],
-                "parameters": t["function"].get("parameters", {"type": "object", "properties": {}}),
-            },
+DEVOPS_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "kubectl_command",
+            "description": (
+                "Run a kubectl command on the Kubernetes cluster (Minikube). "
+                "Use for: checking pod status, viewing logs, applying manifests, "
+                "scaling deployments, describing resources, getting cluster info. "
+                "Examples: 'get pods', 'get pods -n kube-system', 'describe deployment myapp', "
+                "'get nodes', 'get services', 'logs pod-name'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "kubectl subcommand WITHOUT the 'kubectl' prefix. E.g. 'get pods -n default'"
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Plain-English explanation of what this command does and why."
+                    }
+                },
+                "required": ["command", "description"]
+            }
         }
-        for t in TOOL_DEFINITIONS
-    ]
-
-    # Prepend system prompt if not already present
-    if not messages or messages[0].get("role") != "system":
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
-
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": messages,
-        "tools": tools,
-        "stream": False,
-        # Disable qwen3 extended thinking — on CPU it burns the full timeout
-        # before producing a response. Plain tool-call answers need no CoT.
-        "options": {"think": False},
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_ansible_playbook",
+            "description": (
+                "Generate and run an Ansible playbook to automate infrastructure tasks. "
+                "Use for: deploying applications, configuring servers, installing packages, "
+                "managing services. The playbook will be scanned for security issues "
+                "before the user is asked to approve it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "playbook_content": {
+                        "type": "string",
+                        "description": "Complete YAML content of the Ansible playbook to run."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Plain-English explanation of what this playbook does."
+                    }
+                },
+                "required": ["playbook_content", "description"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "trigger_jenkins_job",
+            "description": (
+                "Trigger a Jenkins CI/CD build job. "
+                "Use when the user wants to run a build, deploy, or test pipeline."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_name": {
+                        "type": "string",
+                        "description": "Exact name of the Jenkins job to trigger."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Plain-English explanation of what triggering this job will do."
+                    }
+                },
+                "required": ["job_name", "description"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "docker_operation",
+            "description": (
+                "Perform Docker operations: list containers/images, view logs, "
+                "check resource usage. Use for inspecting Docker state."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "description": "One of: ps, images, logs, stats, pull, prune, inspect",
+                        "enum": ["ps", "images", "logs", "stats", "pull", "prune", "inspect"]
+                    },
+                    "args": {
+                        "type": "string",
+                        "description": "Additional arguments, e.g. container name for logs.",
+                        "default": ""
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Plain-English explanation of what this does."
+                    }
+                },
+                "required": ["operation", "description"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "jenkins_status",
+            "description": (
+                "Check Jenkins health and job status without triggering anything. "
+                "Use BEFORE triggering jobs to verify the job exists, "
+                "or to show the user recent build results."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "One of: list_jobs, job_status, build_log, health",
+                        "enum": ["list_jobs", "job_status", "build_log", "health"]
+                    },
+                    "job_name": {
+                        "type": "string",
+                        "description": "Job name (required for job_status and build_log)",
+                        "default": ""
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Plain-English explanation of what this check will show."
+                    }
+                },
+                "required": ["action", "description"]
+            }
+        }
     }
-
-    try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                f"{OLLAMA_URL}/api/chat",
-                json=payload,
-            )
-            if resp.status_code != 200:
-                error_text = resp.text
-                raise HTTPException(503, f"Ollama error ({resp.status_code}): {error_text}")
-            return resp.json()
-    except httpx.ConnectError:
-        raise HTTPException(503, f"Cannot connect to Ollama at {OLLAMA_URL}. Is it running?")
-    except httpx.ReadTimeout:
-        raise HTTPException(503, f"Ollama timed out — model is too slow. Try: ollama pull llama3.1:8b")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(503, f"Ollama request error: {str(e)}")
+]
 
 
+# ---- System prompt ----
+# KEY: Do NOT tell the LLM it "cannot" execute. It should call tools freely.
+# The approval gate is in the UI — the LLM's job is to choose the right tool.
+
+SYSTEM_PROMPT = """You are DevGordon, a DevOps assistant for a local Kubernetes lab.
+
+Your stack: Ansible, Jenkins, Minikube/kubectl, Docker, SonarQube.
+
+When a user asks you to DO something with infrastructure, call the appropriate tool.
+When a user asks a question that needs live data (pods, builds, images), call a tool to get it.
+Do not explain how to do things manually — just call the tool.
+
+The user will see an approval card before anything executes. You don't need to ask permission first.
+
+Tools available:
+- kubectl_command: run any kubectl command (get pods, describe, logs, etc.)
+- run_ansible_playbook: generate and run Ansible playbooks
+- trigger_jenkins_job: trigger a Jenkins build
+- docker_operation: list containers, images, logs
+- jenkins_status: check Jenkins health and job status
+
+Be concise. If you're calling a tool, a brief one-sentence explanation is enough.
+If you're answering a question (no tool needed), keep it short and practical."""
 
 
-# ============================================================================
-# ROUTES
-# ============================================================================
+# ---- Routes ----
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return (Path(__file__).parent / "static" / "index.html").read_text()
+
+
+@app.get("/health")
+async def health():
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{OLLAMA_URL}/api/tags")
+            models = [m["name"] for m in r.json().get("models", [])]
+    except Exception:
+        models = []
+        ollama_status = "unreachable"
+    else:
+        ollama_status = "ok" if models else "no_models"
+
+    return {
+        "status": "ok",
+        "ollama": ollama_status,
+        "models_available": models,
+        "selected_model": _selected_model if ollama_status == "ok" else None,
+        "jenkins": JENKINS_URL,
+        "sonarqube": SONAR_URL,
+    }
+
+
+@app.get("/models")
+async def list_models():
+    global _selected_model
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{OLLAMA_URL}/api/tags")
+            models = [m["name"] for m in r.json().get("models", [])]
+    except Exception as e:
+        return {
+            "error": str(e),
+            "models": [],
+            "selected_model": None,
+            "message": "Ollama is not reachable."
+        }
+
+    if not models:
+        return {
+            "error": "no_models",
+            "models": [],
+            "selected_model": None,
+            "message": "No models installed. Run: docker exec devgordon-ollama ollama pull llama3"
+        }
+
+    if not _selected_model or _selected_model not in models:
+        _selected_model = models[0]
+
+    return {"models": models, "selected_model": _selected_model}
+
+
+@app.post("/select-model")
+async def select_model(body: dict):
+    global _selected_model
+    model_name = body.get("model", "")
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(f"{OLLAMA_URL}/api/tags")
+            available = [m["name"] for m in r.json().get("models", [])]
+    except Exception:
+        available = []
+
+    if model_name not in available:
+        return {"error": f"Model '{model_name}' not found. Available: {', '.join(available)}"}
+
+    _selected_model = model_name
+    return {"status": "ok", "selected_model": _selected_model}
 
 
 @app.get("/history")
@@ -184,308 +294,212 @@ async def reset_conversation():
     return {"status": "cleared"}
 
 
-@app.get("/approval-mode")
-async def get_approval_mode():
-    return {"mode": _approval_mode}
-
-
-@app.post("/approval-mode")
-async def set_approval_mode(body: dict):
-    global _approval_mode
-    mode = body.get("mode", "")
-    if mode not in ("always", "writes", "never"):
-        raise HTTPException(400, "mode must be 'always', 'writes', or 'never'")
-    _approval_mode = mode
-    return {"mode": _approval_mode}
-
-
-@app.get("/health")
-async def health():
-    # Check Ollama and list available models
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(f"{OLLAMA_URL}/api/tags")
-            models = [m["name"] for m in r.json().get("models", [])]
-        ollama_status = "ok" if OLLAMA_MODEL in models else "model_not_found"
-    except Exception:
-        models = []
-        ollama_status = "unreachable"
-
-    return {
-        "status": "ok" if ollama_status == "ok" else "degraded",
-        "ollama": ollama_status,
-        "model_selected": OLLAMA_MODEL,
-        "models_available": models,
-        "jenkins": JENKINS_URL,
-        "sonarqube": SONAR_URL,
-    }
-
-
-@app.post("/select-model")
-async def select_model(body: dict):
+@app.post("/chat")
+async def chat(msg: ChatMessage):
     """
-    Select a different Ollama model. Changes OLLAMA_MODEL env var for new connections.
-    Note: Already-connected clients continue with previous model.
+    Send a message to Ollama WITH tools. If Ollama calls a tool,
+    return a pending_approval card (with scan results) instead of plain text.
     """
-    global OLLAMA_MODEL
-    model_name = body.get("model", "")
+    global _selected_model
+
+    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    messages += msg.history
+    messages.append({"role": "user", "content": msg.message})
+
+    # Validate Ollama is up and has a model
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             r = await client.get(f"{OLLAMA_URL}/api/tags")
             available = [m["name"] for m in r.json().get("models", [])]
-    except Exception:
-        available = []
+    except Exception as e:
+        raise HTTPException(503, f"Cannot reach Ollama: {str(e)}")
 
-    if model_name and model_name not in available:
-        return {"error": f"Model '{model_name}' not found in Ollama. Available: {available}"}
+    if not available:
+        raise HTTPException(503, "No models installed. Run: ollama pull llama3")
 
-    if model_name:
-        OLLAMA_MODEL = model_name
-        return {
-            "status": "ok",
-            "selected_model": model_name,
-            "message": f"Switched to {model_name}. New conversations will use this model."
-        }
+    if not _selected_model or _selected_model not in available:
+        _selected_model = available[0]
 
-    return {
-        "status": "ok",
-        "selected_model": OLLAMA_MODEL,
-        "available_models": available,
+    payload = {
+        "model": _selected_model,
+        "messages": messages,
+        "tools": DEVOPS_TOOLS,   # <-- THIS is the fix. Without this, LLM never uses tools.
+        "stream": False,
     }
 
-
-# ============================================================================
-# CORE: CHAT  →  APPROVAL CARD
-# ============================================================================
-
-@app.post("/chat")
-async def chat(msg: ChatMessage):
-    """
-    Send a message to DevGordon (locally via Ollama with tool calling).
-
-    Flow:
-      1. Build conversation from server-side history (or override with msg.history)
-      2. Call Ollama /api/chat with tool schema
-      3a. No tool_calls in response → plain text reply
-      3b. tool_calls present → run pre_scan, return pending_approval card
-    """
-    # Build message list
-    messages = list(_conversation_history) if not msg.history else list(msg.history)
-    messages.append({"role": "user", "content": msg.message})
-
-    # Call Ollama with tools
     try:
-        data = await _call_ollama(messages)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(503, f"Ollama error: {str(e)}")
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
+            r.raise_for_status()
+            data = r.json()
+    except httpx.ConnectError:
+        raise HTTPException(503, "Ollama is not reachable.")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise HTTPException(503, f"Model '{_selected_model}' not found. Try: ollama pull {_selected_model}")
+        raise HTTPException(503, f"Ollama error: {e.response.status_code}")
 
-    message_obj = data.get("message", {})
-    tool_calls = message_obj.get("tool_calls", [])
-    text = message_obj.get("content", "")
+    response_message = data.get("message", {})
+    tool_calls = response_message.get("tool_calls", [])
 
-    # ---- Update server-side history ----
-    _conversation_history.append({"role": "user", "content": msg.message})
-
-    # ---- Tool call path ----
+    # ---- Tool call: show approval card ----
     if tool_calls:
-        # Ollama returns: [{"id": "...", "function": {"name": "...", "arguments": "..."}}]
-        tool_call = tool_calls[0]  # Take the first tool call
-        call_id = tool_call.get("id", "")
-        func = tool_call.get("function", {})
-        tool_name = func.get("name", "")
-        
-        # Ollama returns arguments as a dict directly (not a JSON string like OpenAI)
-        raw_args = func.get("arguments", {})
-        if isinstance(raw_args, str):
-            try:
-                tool_args = json.loads(raw_args)
-            except (json.JSONDecodeError, TypeError):
-                tool_args = {}
-        else:
-            tool_args = raw_args or {}
+        tool_call = tool_calls[0]
+        fn = tool_call.get("function", {})
+        tool_name = fn.get("name", "")
+        tool_args = fn.get("arguments", {})
 
-        explanation = text or f"Running {tool_name} to fulfil your request."
+        # The explanation comes from the text content alongside the tool call (if any)
+        explanation = response_message.get("content") or tool_args.get("description") or f"I'll run `{tool_name}` for you."
 
-        # Store assistant response with tool_calls
-        _conversation_history.append({
-            "role": "assistant",
-            "content": text,
-            "tool_calls": tool_calls,
-        })
-
-        # Pre-execution security scan
+        # Scan before showing the approval card
         from scanner import pre_scan
         scan_result = pre_scan(tool_name, tool_args)
 
-        # Decide whether to show an approval card or auto-execute
-        needs_card = True
-        if _approval_mode == "never":
-            needs_card = False
-        elif _approval_mode == "writes" and _is_read_only(tool_name, tool_args):
-            needs_card = False
+        call_id = str(uuid.uuid4())[:8]
 
-        if not needs_card:
-            # Auto-execute — no card shown
-            from tools import execute_tool
-            result = execute_tool(tool_name, tool_args)
-            output_snippet = str(result.get("output", ""))[:2000]
-            _conversation_history.append({"role": "tool", "content": output_snippet})
-            # Ask Ollama to interpret
-            interpretation = ""
-            try:
-                async with httpx.AsyncClient(timeout=120) as client:
-                    ir = await client.post(f"{OLLAMA_URL}/api/chat", json={
-                        "model": OLLAMA_MODEL,
-                        "messages": list(_conversation_history),
-                        "stream": False,
-                        "options": {"think": False},
-                    })
-                    if ir.status_code == 200:
-                        interpretation = ir.json().get("message", {}).get("content", "")
-                        if interpretation:
-                            _conversation_history.append({"role": "assistant", "content": interpretation})
-            except Exception:
-                pass
-            return {
-                "type": "auto_executed",
-                "tool_name": tool_name,
-                "tool_args": tool_args,
-                "result": result,
-                "interpretation": interpretation or explanation,
-                "model_used": OLLAMA_MODEL,
-            }
+        _conversation_history.append({"role": "user", "content": msg.message})
+        _conversation_history.append({"role": "assistant", "content": explanation})
 
         return {
             "type": "pending_approval",
-            "call_id": call_id,
             "tool_name": tool_name,
             "tool_args": tool_args,
             "explanation": explanation,
-            "scan": scan_result,
-            "model_used": OLLAMA_MODEL,
+            "scan": {
+                "status": scan_result.get("status", "skipped"),
+                "issues": scan_result.get("issues", [])
+            },
+            "call_id": call_id,
+            "model_used": _selected_model,
         }
 
-    # ---- Plain text path ----
-    _conversation_history.append({"role": "assistant", "content": text})
+    # ---- Plain text response ----
+    content = response_message.get("content", "(no response)")
+    _conversation_history.append({"role": "user", "content": msg.message})
+    _conversation_history.append({"role": "assistant", "content": content})
 
     return {
         "type": "message",
-        "content": text or "(no response from Ollama)",
-        "model_used": OLLAMA_MODEL,
+        "content": content,
+        "model_used": _selected_model,
     }
 
-
-# ============================================================================
-# CORE: EXECUTE  →  INTERPRET
-# ============================================================================
 
 @app.post("/execute")
 async def execute(body: dict):
     """
-    Execute an approved tool call, then ask Claude to interpret the output.
-
-    Expects:
-      { "tool_name": "...", "tool_args": {...}, "tool_call_id": "..." }
-
-    Returns:
-      { "result": {...}, "interpretation": "..." }
+    Execute a tool after the user approves it.
+    Frontend sends: tool_name, tool_args, tool_call_id
     """
-    from tools import execute_tool
+    import subprocess, tempfile, shlex
 
-    tool_name = body.get("tool_name")
-    tool_args = body.get("tool_args", {})
-    tool_call_id = body.get("tool_call_id", "")
+    # FIX: frontend sends "tool_name" and "tool_args", not "tool" and "args"
+    tool_name = body.get("tool_name") or body.get("tool")
+    tool_args = body.get("tool_args") or body.get("args", {})
 
     if not tool_name:
         raise HTTPException(400, "Missing tool_name")
 
-    # Run the actual command / playbook / API call
-    result = execute_tool(tool_name, tool_args)
+    # ---- kubectl ----
+    if tool_name == "kubectl_command":
+        command = tool_args.get("command", "")
+        args = ["kubectl"] + shlex.split(command)
+        try:
+            result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+            output = result.stdout + ("\n" + result.stderr if result.stderr else "")
+            return {"result": {"success": result.returncode == 0, "output": output or "(no output)"}}
+        except FileNotFoundError:
+            return {"result": {"success": False, "output": "kubectl not found. Is Minikube running?"}}
+        except subprocess.TimeoutExpired:
+            return {"result": {"success": False, "output": "kubectl timed out after 30s"}}
 
-    # Append tool_result turn to history so Claude has context
-    output_snippet = str(result.get("output", ""))[:2000]
-    # Ollama expects tool results as role="tool" with plain string content
-    _conversation_history.append({
-        "role": "tool",
-        "content": output_snippet,
-    })
+    # ---- ansible ----
+    elif tool_name == "run_ansible_playbook":
+        # Support both "playbook_content" (from tools.py) and "playbook_yaml" (legacy)
+        playbook_content = tool_args.get("playbook_content") or tool_args.get("playbook_yaml", "")
+        if not playbook_content:
+            return {"result": {"success": False, "output": "No playbook content provided."}}
 
-    # Ask Ollama to interpret (no tools on this call — just a text reply)
-    interpretation = ""
-    try:
-        # For interpretation, we don't need to pass tools — just ask for text
-        interp_payload = {
-            "model": OLLAMA_MODEL,
-            "messages": list(_conversation_history),
-            "stream": False,
-        }
-        async with httpx.AsyncClient(timeout=60) as client:
-            interp_resp = await client.post(
-                f"{OLLAMA_URL}/api/chat",
-                json=interp_payload,
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False, prefix="/tmp/devgordon_") as f:
+            f.write(playbook_content)
+            tmp_path = f.name
+        try:
+            result = subprocess.run(
+                ["ansible-playbook", tmp_path, "-i", "localhost,", "--connection=local"],
+                capture_output=True, text=True, timeout=120
             )
-            if interp_resp.status_code == 200:
-                interp_data = interp_resp.json()
-                interpretation = interp_data.get("message", {}).get("content", "")
-                if interpretation:
-                    _conversation_history.append({"role": "assistant", "content": interpretation})
-    except Exception:
-        # Interpretation is best-effort; don't fail the whole request
-        pass
+            output = result.stdout + ("\n" + result.stderr if result.stderr else "")
+            return {"result": {"success": result.returncode == 0, "output": output or "(no output)"}}
+        except subprocess.TimeoutExpired:
+            return {"result": {"success": False, "output": "ansible-playbook timed out after 120s"}}
+        except FileNotFoundError:
+            return {"result": {"success": False, "output": "ansible-playbook not found in container."}}
+        finally:
+            import os; os.unlink(tmp_path)
 
-    return {
-        "result": result,
-        "interpretation": interpretation,
-        "model_used": OLLAMA_MODEL,
-    }
+    # ---- jenkins trigger ----
+    elif tool_name == "trigger_jenkins_job":
+        job_name = tool_args.get("job_name", "")
+        jenkins_user = os.getenv("JENKINS_USER", "admin")
+        jenkins_token = os.getenv("JENKINS_TOKEN", "")
+        if not jenkins_token:
+            return {"result": {"success": False, "output": "JENKINS_TOKEN not set. Add it to .env and restart."}}
+        url = f"{JENKINS_URL}/job/{job_name}/build"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                r = await client.post(url, auth=(jenkins_user, jenkins_token))
+            success = r.status_code in (200, 201)
+            return {"result": {
+                "success": success,
+                "output": f"Build triggered (HTTP {r.status_code})" if success else f"Jenkins returned {r.status_code}: {r.text}"
+            }}
+        except Exception as e:
+            return {"result": {"success": False, "output": str(e)}}
+
+    # ---- docker ----
+    elif tool_name == "docker_operation":
+        operation = tool_args.get("operation", "ps")
+        extra_args = tool_args.get("args", "").strip()
+        op_map = {
+            "ps":      ["docker", "ps", "-a"],
+            "images":  ["docker", "images"],
+            "logs":    ["docker", "logs"],
+            "stats":   ["docker", "stats", "--no-stream"],
+            "pull":    ["docker", "pull"],
+            "prune":   ["docker", "system", "prune", "-f"],
+            "inspect": ["docker", "inspect"],
+        }
+        cmd = op_map.get(operation, ["docker", operation])
+        if extra_args:
+            cmd += extra_args.split()
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            output = result.stdout + (result.stderr if result.stderr else "")
+            return {"result": {"success": result.returncode == 0, "output": output or "(no output)"}}
+        except FileNotFoundError:
+            return {"result": {"success": False, "output": "Docker not found or not running."}}
+
+    # ---- jenkins status (read-only) ----
+    elif tool_name == "jenkins_status":
+        from tools import execute_tool
+        result = execute_tool(tool_name, tool_args)
+        return {"result": result}
+
+    else:
+        raise HTTPException(400, f"Unknown tool: {tool_name}")
 
 
 @app.post("/reject")
 async def reject(body: dict):
-    """
-    User rejected a pending tool call.
-    1. Feed a tool_result back to Claude (required to keep conversation valid).
-    2. Ask Claude for an alternative — return that as a suggestion.
-    """
-    tool_call_id = body.get("tool_call_id", "")
-
-    if tool_call_id:
-        # Ollama expects tool results as role="tool" with plain string content
-        _conversation_history.append({
-            "role": "tool",
-            "content": "User rejected this action. Do not retry it.",
-        })
-
-    # Ask Ollama what to suggest instead (no tools — just a text reply)
-    suggestion = "Understood. Let me know what you'd like to do differently."
-    try:
-        suggest_payload = {
-            "model": OLLAMA_MODEL,
-            "messages": list(_conversation_history),
-            "stream": False,
-        }
-        async with httpx.AsyncClient(timeout=60) as client:
-            suggest_resp = await client.post(
-                f"{OLLAMA_URL}/api/chat",
-                json=suggest_payload,
-            )
-            if suggest_resp.status_code == 200:
-                suggest_data = suggest_resp.json()
-                text = suggest_data.get("message", {}).get("content", "")
-                if text:
-                    suggestion = text
-                    _conversation_history.append({"role": "assistant", "content": suggestion})
-    except Exception:
-        pass
-
-    return {"status": "rejected", "suggestion": suggestion}
+    _conversation_history.append({
+        "role": "assistant",
+        "content": "Action rejected by user."
+    })
+    return {"status": "rejected"}
 
 
-# ============================================================================
-# MCP ENDPOINTS  (external agents / tool discovery)
-# ============================================================================
+# ---- MCP Endpoints ----
 
 @app.get("/mcp/tools")
 async def mcp_list_tools():
@@ -495,7 +509,7 @@ async def mcp_list_tools():
             {
                 "name": t["function"]["name"],
                 "description": t["function"]["description"],
-                "inputSchema": t["function"].get("parameters", {}),
+                "inputSchema": t["function"].get("parameters", {})
             }
             for t in TOOL_DEFINITIONS
         ]
@@ -513,13 +527,11 @@ async def mcp_call_tool(body: dict):
     return {
         "success": result.get("success", False),
         "output": result.get("output", ""),
-        "returncode": result.get("returncode", -1),
+        "returncode": result.get("returncode", -1)
     }
 
 
-# ============================================================================
-# CODE QUALITY  (SonarQube / ansible-lint)
-# ============================================================================
+# ---- Code Quality Scanning ----
 
 @app.post("/scan-code")
 async def scan_code(body: dict):
@@ -534,7 +546,7 @@ async def scan_code(body: dict):
         "scan_status": scan_result.get("status"),
         "issues": scan_result.get("issues", []),
         "recommendation": scan_result.get("recommendation", ""),
-        "can_approve": scan_result.get("status") not in ["error"],
+        "can_approve": scan_result.get("status") not in ["error"]
     }
 
 
@@ -546,5 +558,5 @@ async def sonarqube_standards():
         "status": issues.get("status"),
         "project": "devgordon",
         "recent_issues": issues.get("issues", []),
-        "sonar_url": SONAR_URL,
+        "sonar_url": SONAR_URL
     }
