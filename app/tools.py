@@ -177,6 +177,79 @@ TOOL_DEFINITIONS = [
                 "required": ["action"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_workspace_file",
+            "description": (
+                "Read any file in the project workspace. Use this to inspect the "
+                "Jenkinsfile, Ansible playbooks, Kubernetes manifests, source code, "
+                "docker-compose.yml, requirements.txt, or any other project file. "
+                "Always read a file before modifying it. Path is relative to project root."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path from project root, e.g. 'Jenkinsfile' or 'k8s/deployment.yaml' or 'app/main.py'"
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_workspace_file",
+            "description": (
+                "Write or update a file in the project workspace. Use this to modify "
+                "the Jenkinsfile, update Kubernetes manifests, edit Ansible playbooks, "
+                "or create new configuration files. Always read the file first. "
+                "Content will be written exactly as provided. Path is relative to project root."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Relative path from project root, e.g. 'Jenkinsfile' or 'k8s/deployment.yaml'"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Full file content to write"
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Brief explanation of what is being changed and why"
+                    }
+                },
+                "required": ["path", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_workspace",
+            "description": (
+                "List files and directories in the project workspace. "
+                "Use this to explore the project structure before reading specific files, "
+                "or to check if a file exists. Directory is relative to project root."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "directory": {
+                        "type": "string",
+                        "description": "Relative directory path to list, e.g. '' for root, 'app', 'k8s', 'ansible'",
+                        "default": ""
+                    }
+                }
+            }
+        }
     }
 ]
 
@@ -196,6 +269,9 @@ def execute_tool(tool_name: str, args: dict) -> dict:
         "kubectl_command": _kubectl,
         "docker_operation": _docker,
         "jenkins_status": _jenkins_status,
+        "read_workspace_file": _read_workspace_file,
+        "write_workspace_file": _write_workspace_file,
+        "list_workspace": _list_workspace,
     }
     fn = executors.get(tool_name)
     if not fn:
@@ -306,7 +382,7 @@ def _get_kube_server():
 
     try:
         import yaml
-        kubeconfig = ".kube/config" # <-- FINNICKY ASK LINE!!!
+        kubeconfig = os.path.expanduser("~/.kube/config")
         with open(kubeconfig) as f:
             cfg = yaml.safe_load(f)
         current_context = cfg.get("current-context", "")
@@ -432,3 +508,135 @@ def _jenkins_status(args: dict) -> dict:
         return {"success": False, "output": str(e)}
 
     return {"success": False, "output": "Invalid action or missing required parameters"}
+
+
+# ----------------------------------------------------------------
+# WORKSPACE TOOLS — read/write project files via /workspace mount
+# ----------------------------------------------------------------
+
+WORKSPACE_ROOT = os.getenv("WORKSPACE", "/workspace")
+
+# Files DevGordon is never allowed to read or write
+_BLOCKED_PATHS = {".env", ".env.example"}
+
+def _safe_workspace_path(relative_path: str) -> tuple[str, str | None]:
+    """
+    Resolve a relative path inside WORKSPACE_ROOT safely.
+    Returns (absolute_path, error_message_or_None).
+    Prevents path traversal outside the workspace.
+    """
+    # Strip leading slashes so os.path.join behaves
+    rel = relative_path.lstrip("/")
+
+    # Block sensitive files
+    filename = os.path.basename(rel)
+    if filename in _BLOCKED_PATHS:
+        return "", f"Access to '{filename}' is blocked for security reasons"
+
+    abs_path = os.path.normpath(os.path.join(WORKSPACE_ROOT, rel))
+
+    # Ensure it's still inside the workspace
+    if not abs_path.startswith(os.path.normpath(WORKSPACE_ROOT)):
+        return "", "Path traversal outside workspace is not allowed"
+
+    return abs_path, None
+
+
+def _read_workspace_file(args: dict) -> dict:
+    """Read a file from the project workspace."""
+    path = args.get("path", "").strip()
+    if not path:
+        return {"success": False, "output": "No path provided"}
+
+    abs_path, err = _safe_workspace_path(path)
+    if err:
+        return {"success": False, "output": err}
+
+    if not os.path.exists(abs_path):
+        return {"success": False, "output": f"File not found: {path}\nWorkspace root: {WORKSPACE_ROOT}"}
+
+    if not os.path.isfile(abs_path):
+        return {"success": False, "output": f"'{path}' is a directory, not a file. Use list_workspace to explore."}
+
+    try:
+        with open(abs_path, "r", errors="replace") as f:
+            content = f.read()
+        size = len(content)
+        # Truncate very large files so we don't blow the context window
+        if size > 12000:
+            content = content[:12000] + f"\n\n[... truncated — file is {size} chars, showing first 12000]"
+        return {
+            "success": True,
+            "output": f"=== {path} ===\n{content}",
+            "path": path,
+            "size": size
+        }
+    except Exception as e:
+        return {"success": False, "output": f"Could not read file: {e}"}
+
+
+def _write_workspace_file(args: dict) -> dict:
+    """Write a file to the project workspace."""
+    path = args.get("path", "").strip()
+    content = args.get("content", "")
+    reason = args.get("reason", "No reason provided")
+
+    if not path:
+        return {"success": False, "output": "No path provided"}
+    if not content:
+        return {"success": False, "output": "No content provided"}
+
+    abs_path, err = _safe_workspace_path(path)
+    if err:
+        return {"success": False, "output": err}
+
+    # Don't allow writing outside existing directories (no mkdir -p)
+    parent = os.path.dirname(abs_path)
+    if not os.path.isdir(parent):
+        return {"success": False, "output": f"Parent directory does not exist: {os.path.dirname(path)}"}
+
+    try:
+        with open(abs_path, "w") as f:
+            f.write(content)
+        return {
+            "success": True,
+            "output": f"✓ Written {len(content)} chars to {path}\nReason: {reason}"
+        }
+    except Exception as e:
+        return {"success": False, "output": f"Could not write file: {e}"}
+
+
+def _list_workspace(args: dict) -> dict:
+    """List files in a workspace directory."""
+    directory = args.get("directory", "").strip().lstrip("/")
+    abs_path, err = _safe_workspace_path(directory) if directory else (WORKSPACE_ROOT, None)
+
+    if err:
+        return {"success": False, "output": err}
+
+    if not os.path.exists(abs_path):
+        return {"success": False, "output": f"Directory not found: {directory or '(root)'}"}
+
+    if not os.path.isdir(abs_path):
+        return {"success": False, "output": f"'{directory}' is a file, not a directory"}
+
+    try:
+        lines = []
+        for entry in sorted(os.scandir(abs_path), key=lambda e: (not e.is_dir(), e.name)):
+            # Skip hidden files and tmp generated dir
+            if entry.name.startswith(".") or entry.name == "__pycache__":
+                continue
+            prefix = "📁 " if entry.is_dir() else "📄 "
+            size = ""
+            if entry.is_file():
+                s = entry.stat().st_size
+                size = f"  ({s:,} bytes)"
+            lines.append(f"{prefix}{entry.name}{size}")
+
+        display_dir = directory or "(project root)"
+        return {
+            "success": True,
+            "output": f"Contents of {display_dir}:\n" + "\n".join(lines)
+        }
+    except Exception as e:
+        return {"success": False, "output": f"Could not list directory: {e}"}

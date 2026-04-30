@@ -12,8 +12,11 @@ services:
     restart: unless-stopped
     volumes:
       - ~/.kube/config:/.kube/config:ro
+      - ./:/workspace:rw          # project root — DevGordon can read/write Jenkinsfile, manifests, etc.
     environment:
       - KUBECONFIG=/home/devgordon/.kube/config
+      - WORKSPACE=/workspace
+      - SONAR_URL=http://sonarqube:9000
   jenkins:
     image: jenkins/jenkins:lts-jdk17
     ports:

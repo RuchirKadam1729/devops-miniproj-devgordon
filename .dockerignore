@@ -80,6 +80,5 @@ Thumbs.db
 # Project-specific
 node_modules/
 ansible/*.retry
-tests/
 *.bak
 *.swp

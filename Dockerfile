@@ -13,6 +13,8 @@ RUN apt-get update && apt-get install -y \
     ansible \
     curl \
     ruby-full \
+    default-jre-headless \
+    unzip \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Pip tools - separate layer
@@ -26,6 +28,18 @@ RUN ansible-galaxy collection install kubernetes.core
 RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" \
     && chmod +x kubectl \
     && mv kubectl /usr/local/bin/kubectl
+
+# Install sonar-scanner CLI — used to pre-scan AI-generated code before approval
+# Requires Java (installed above). Pinned version for reproducibility.
+RUN curl -sL -o /tmp/sonar.zip \
+    https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-5.0.1.3006-linux.zip \
+    && unzip -q /tmp/sonar.zip -d /opt \
+    && mv /opt/sonar-scanner-5.0.1.3006-linux /opt/sonar-scanner \
+    && ln -s /opt/sonar-scanner/bin/sonar-scanner /usr/local/bin/sonar-scanner \
+    && rm /tmp/sonar.zip
+
+# Create workspace tmp dir for generated code scans
+RUN mkdir -p /workspace/tmp/generated
 
 # Create a non-root user — running as root in a container is bad practice
 # (and SonarQube would flag it if you didn't)
@@ -47,7 +61,8 @@ COPY . .
 WORKDIR /app/app
 
 # Switch to non-root user
-RUN chown -R devgordon:devgordon /app
+RUN chown -R devgordon:devgordon /app && \
+    chown -R devgordon:devgordon /workspace/tmp
 USER devgordon
 
 # Expose port 8000 (FastAPI default)
