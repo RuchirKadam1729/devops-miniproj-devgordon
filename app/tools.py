@@ -20,7 +20,7 @@ import json
 import requests
 
 # Jenkins connection details — pulled from env vars set in docker-compose.yml
-JENKINS_URL = os.getenv("JENKINS_URL", "http://localhost:8080")
+JENKINS_URL = os.getenv("JENKINS_URL", "http://jenkins:8080")
 JENKINS_USER = os.getenv("JENKINS_USER", "admin")
 JENKINS_TOKEN = os.getenv("JENKINS_TOKEN", "")
 
