@@ -9,7 +9,8 @@ surface is on full display in one terminal run.
 Usage:
     python devgordon_showcase.py
     python devgordon_showcase.py --url http://localhost:8000
-    python devgordon_showcase.py --pause   # wait for Enter between scenarios
+    python devgordon_showcase.py --pause     # wait for Enter between scenarios
+    python devgordon_showcase.py --scenario 3  # run only scenario N
 """
 
 import argparse
@@ -20,13 +21,13 @@ import textwrap
 import httpx
 
 # ── Terminal colours ──────────────────────────────────────────────────────────
-R  = "\033[0;31m"
-G  = "\033[0;32m"
-Y  = "\033[0;33m"
-B  = "\033[0;34m"
-P  = "\033[0;35m"
-C  = "\033[0;36m"
-W  = "\033[1;37m"
+R   = "\033[0;31m"
+G   = "\033[0;32m"
+Y   = "\033[0;33m"
+B   = "\033[0;34m"
+P   = "\033[0;35m"
+C   = "\033[0;36m"
+W   = "\033[1;37m"
 DIM = "\033[2m"
 RST = "\033[0m"
 
@@ -34,7 +35,6 @@ def hdr(title): print(f"\n{W}{'─'*70}{RST}\n{W}{title}{RST}\n{'─'*70}")
 def ok(s):      print(f"  {G}✔{RST} {s}")
 def warn(s):    print(f"  {Y}⚠{RST}  {s}")
 def fail(s):    print(f"  {R}✗{RST} {s}")
-def info(s):    print(f"  {DIM}{s}{RST}")
 def label(k,v): print(f"  {C}{k:18}{RST} {v}")
 
 def wrap(text, width=66, indent="    "):
@@ -48,30 +48,22 @@ def wrap(text, width=66, indent="    "):
             lines.append("")
     return "\n".join(lines)
 
-# ── Scenario definitions ──────────────────────────────────────────────────────
-#
-# Each scenario has:
-#   prompt      – what the user types
-#   expect_tool – tool name we expect DevGordon to call (None = plain text ok)
-#   desc        – human description shown in the header
-#   eval_fn     – optional callable(response_dict) → (passed: bool, note: str)
-#
+
+# ── Eval helpers ──────────────────────────────────────────────────────────────
+
 def _used_tool(data, name):
-    """True if the response shows the named tool was called."""
     return data.get("tool_name") == name or (
         data.get("type") == "auto_executed" and data.get("tool_name") == name
     )
 
 def _has_output(data):
-    result = data.get("result", {})
-    return bool(result.get("output", "").strip())
+    return bool(data.get("result", {}).get("output", "").strip())
 
-def _success(data):
-    result = data.get("result", {})
-    return result.get("success", False)
 
+# ── Scenarios ─────────────────────────────────────────────────────────────────
 
 SCENARIOS = [
+
     # ── Kubernetes ────────────────────────────────────────────────────────────
     {
         "desc":        "K8s — list running pods",
@@ -102,7 +94,7 @@ SCENARIOS = [
     },
     {
         "desc":        "K8s — cluster nodes",
-        "prompt":      "How many nodes does the cluster have and what's their status?",
+        "prompt":      "How many nodes does the cluster have and what is their status?",
         "expect_tool": "kubectl_command",
         "eval_fn":     lambda d: (
             _used_tool(d, "kubectl_command") and _has_output(d),
@@ -151,7 +143,7 @@ SCENARIOS = [
     # ── Jenkins ───────────────────────────────────────────────────────────────
     {
         "desc":        "Jenkins — overall status",
-        "prompt":      "What's the current status of Jenkins?",
+        "prompt":      "What is the current status of Jenkins?",
         "expect_tool": "jenkins_status",
         "eval_fn":     lambda d: (
             _used_tool(d, "jenkins_status"),
@@ -188,10 +180,91 @@ SCENARIOS = [
         ),
     },
 
+    # ── Workspace — file awareness ────────────────────────────────────────────
+    {
+        "desc":        "Workspace — explore project structure",
+        "prompt":      "Show me the project structure — what files and folders exist?",
+        "expect_tool": "list_workspace",
+        "eval_fn":     lambda d: (
+            _used_tool(d, "list_workspace") and _has_output(d),
+            "list_workspace called and returned directory listing"
+        ),
+    },
+    {
+        "desc":        "Workspace — read Jenkinsfile",
+        "prompt":      "Read the Jenkinsfile and explain what each stage does",
+        "expect_tool": "read_workspace_file",
+        "eval_fn":     lambda d: (
+            _used_tool(d, "read_workspace_file") and _has_output(d),
+            "Jenkinsfile read and content returned"
+        ),
+    },
+    {
+        "desc":        "Workspace — read K8s deployment manifest",
+        "prompt":      "Read the Kubernetes deployment manifest and tell me the resource limits",
+        "expect_tool": "read_workspace_file",
+        "eval_fn":     lambda d: (
+            _used_tool(d, "read_workspace_file") and _has_output(d),
+            "deployment.yaml read successfully"
+        ),
+    },
+    {
+        "desc":        "Workspace — read Ansible deploy playbook",
+        "prompt":      "Read the Ansible deploy playbook and summarise what it does",
+        "expect_tool": "read_workspace_file",
+        "eval_fn":     lambda d: (
+            _used_tool(d, "read_workspace_file") and _has_output(d),
+            "ansible/deploy.yml read successfully"
+        ),
+    },
+    {
+        "desc":        "Workspace — write file (triggers pre-scan)",
+        "prompt":      (
+            "Add a Slack notification post-build step to the Jenkinsfile. "
+            "Read it first, then write the updated version."
+        ),
+        "expect_tool": "write_workspace_file",
+        "eval_fn":     lambda d: (
+            _used_tool(d, "read_workspace_file") or _used_tool(d, "write_workspace_file"),
+            "file read/write tools engaged for Jenkinsfile modification"
+        ),
+    },
+
+    # ── Pre-scan — SonarQube / ansible-lint on AI output ─────────────────────
+    {
+        "desc":        "Pre-scan — 0777 playbook flagged before approval",
+        "prompt":      "Write and run an Ansible playbook that creates a file with mode 0777 on localhost",
+        "expect_tool": "run_ansible_playbook",
+        "eval_fn":     lambda d: (
+            d.get("type") in ("pending_approval", "auto_executed")
+            and d.get("tool_name") == "run_ansible_playbook",
+            "playbook generated — scan should flag mode 0777 as a security risk"
+        ),
+    },
+    {
+        "desc":        "Pre-scan — safe kubectl read passes clean",
+        "prompt":      "Get all pods across all namespaces",
+        "expect_tool": "kubectl_command",
+        "eval_fn":     lambda d: (
+            _used_tool(d, "kubectl_command"),
+            "kubectl read-only command passed scan clean"
+        ),
+    },
+    {
+        "desc":        "Pre-scan — kubectl delete flagged as warning",
+        "prompt":      "Delete the nginx pod",
+        "expect_tool": "kubectl_command",
+        "eval_fn":     lambda d: (
+            d.get("type") in ("pending_approval", "auto_executed")
+            and d.get("tool_name") == "kubectl_command",
+            "delete command — scan should flag it as destructive"
+        ),
+    },
+
     # ── Plain text (no tool expected) ─────────────────────────────────────────
     {
         "desc":        "Chat — explain Kubernetes concept",
-        "prompt":      "What's the difference between a Deployment and a StatefulSet?",
+        "prompt":      "What is the difference between a Deployment and a StatefulSet?",
         "expect_tool": None,
         "eval_fn":     lambda d: (
             d.get("type") == "message" and bool(d.get("content", "").strip()),
@@ -209,13 +282,13 @@ SCENARIOS = [
     },
 ]
 
+
 # ── Runner ────────────────────────────────────────────────────────────────────
 
 def run_scenario(client: httpx.Client, s: dict, idx: int, total: int, pause: bool) -> bool:
     hdr(f"[{idx}/{total}] {s['desc']}")
     print(f"  {Y}Prompt:{RST} {s['prompt']}\n")
 
-    # Fresh conversation for each scenario so history never bleeds
     client.post("/reset")
 
     t0 = time.time()
@@ -226,14 +299,13 @@ def run_scenario(client: httpx.Client, s: dict, idx: int, total: int, pause: boo
         fail(f"HTTP {resp.status_code}: {resp.text[:200]}")
         return False
 
-    data = resp.json()
+    data  = resp.json()
     rtype = data.get("type", "unknown")
 
     label("Response type:", rtype)
-    label("Model:", data.get("model_used", "?"))
-    label("Time:", f"{elapsed:.1f}s")
+    label("Model:",         data.get("model_used", "?"))
+    label("Time:",          f"{elapsed:.1f}s")
 
-    # ── If auto_executed, show tool details ───────────────────────────────────
     if rtype == "auto_executed":
         tool_name = data.get("tool_name", "?")
         tool_args = data.get("tool_args", {})
@@ -241,7 +313,7 @@ def run_scenario(client: httpx.Client, s: dict, idx: int, total: int, pause: boo
         interp    = data.get("interpretation", "")
 
         label("Tool called:", f"{P}{tool_name}{RST}")
-        label("Args:", json.dumps(tool_args, separators=(',',':')))
+        label("Args:",        json.dumps(tool_args, separators=(',', ':')))
         label("Exit success:", str(result.get("success", "?")))
 
         output = result.get("output", "").strip()
@@ -253,20 +325,24 @@ def run_scenario(client: httpx.Client, s: dict, idx: int, total: int, pause: boo
             print(f"\n  {G}── Interpretation ──{RST}")
             print(wrap(interp[:600]))
 
-    # ── Plain text ────────────────────────────────────────────────────────────
+    elif rtype == "pending_approval":
+        tool_name = data.get("tool_name", "?")
+        scan      = data.get("scan_result", {})
+        label("Tool called:", f"{P}{tool_name}{RST}")
+        label("Scan status:", scan.get("status", "?"))
+        issues = scan.get("issues", [])
+        if issues:
+            print(f"\n  {Y}── Scan issues ──{RST}")
+            for issue in issues[:5]:
+                print(f"    {issue}")
+
     elif rtype == "message":
         content = data.get("content", "")
         print(f"\n  {G}── Response ──{RST}")
         print(wrap(content[:800]))
 
-    # ── Unexpected pending card (mode should be never) ────────────────────────
-    elif rtype == "pending_approval":
-        warn("Got a pending_approval card — mode=never wasn't applied")
-        label("Tool:", data.get("tool_name", "?"))
-
-    # ── Evaluate ──────────────────────────────────────────────────────────────
     passed = False
-    note = ""
+    note   = ""
     if s.get("eval_fn"):
         try:
             passed, note = s["eval_fn"](data)
@@ -290,16 +366,17 @@ def run_scenario(client: httpx.Client, s: dict, idx: int, total: int, pause: boo
     return passed
 
 
+# ── Main ──────────────────────────────────────────────────────────────────────
+
 def main():
     parser = argparse.ArgumentParser(description="DevGordon capability showcase")
-    parser.add_argument("--url", default="http://localhost:8000", help="DevGordon base URL")
-    parser.add_argument("--pause", action="store_true", help="Pause between scenarios")
+    parser.add_argument("--url",      default="http://localhost:8000")
+    parser.add_argument("--pause",    action="store_true")
     parser.add_argument("--scenario", type=int, default=None, help="Run only scenario N (1-indexed)")
     args = parser.parse_args()
 
     client = httpx.Client(base_url=args.url)
 
-    # ── Pre-flight ────────────────────────────────────────────────────────────
     print(f"\n{W}DevGordon Capability Showcase{RST}")
     print(f"Target: {B}{args.url}{RST}\n")
 
@@ -307,34 +384,28 @@ def main():
         health = client.get("/health", timeout=5).json()
         ollama = health.get("ollama", "?")
         model  = health.get("model_selected", "?")
-        status = health.get("status", "?")
         if ollama == "unreachable":
             print(f"{R}✗ Ollama is unreachable — is it running on the host?{RST}")
             sys.exit(1)
         elif ollama == "model_not_found":
-            print(f"{Y}⚠  Model '{model}' not found in Ollama — pull it first{RST}")
+            print(f"{Y}⚠  Model '{model}' not found — run: ollama pull {model}{RST}")
             sys.exit(1)
         else:
-            print(f"{G}✔ Backend healthy{RST}  status={status}  model={model}")
+            print(f"{G}✔ Backend healthy{RST}  model={model}")
     except Exception as e:
         print(f"{R}✗ Cannot reach {args.url}: {e}{RST}")
         sys.exit(1)
 
-    # ── Set approval mode to never ────────────────────────────────────────────
     client.post("/approval-mode", json={"mode": "never"})
-    print(f"{G}✔ Approval mode set to 'never' (all tools auto-execute){RST}")
+    print(f"{G}✔ Approval mode → never (all tools auto-execute){RST}")
 
-    # ── Run scenarios ─────────────────────────────────────────────────────────
-    scenarios = SCENARIOS
-    if args.scenario is not None:
-        scenarios = [SCENARIOS[args.scenario - 1]]
+    scenarios = SCENARIOS if args.scenario is None else [SCENARIOS[args.scenario - 1]]
 
     results = []
     for i, s in enumerate(scenarios, 1):
         passed = run_scenario(client, s, i, len(scenarios), args.pause)
         results.append((s["desc"], passed))
 
-    # ── Summary ───────────────────────────────────────────────────────────────
     hdr("Summary")
     passed_n = sum(1 for _, p in results if p)
     total_n  = len(results)
@@ -342,11 +413,10 @@ def main():
         sym = f"{G}✔{RST}" if p else f"{R}✗{RST}"
         print(f"  {sym} {desc}")
 
-    pct = int(passed_n / total_n * 100) if total_n else 0
+    pct    = int(passed_n / total_n * 100) if total_n else 0
     colour = G if pct == 100 else Y if pct >= 70 else R
     print(f"\n  {colour}{passed_n}/{total_n} passed ({pct}%){RST}\n")
 
-    # ── Restore approval mode ─────────────────────────────────────────────────
     client.post("/approval-mode", json={"mode": "always"})
     print(f"{DIM}Approval mode restored to 'always'{RST}\n")
 

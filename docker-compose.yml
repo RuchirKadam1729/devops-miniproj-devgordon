@@ -13,6 +13,7 @@ services:
     volumes:
       - ~/.kube/config:/.kube/config:ro
       - ./:/workspace:rw          # project root — DevGordon can read/write Jenkinsfile, manifests, etc.
+      - ./conversations:/app/conversations
     environment:
       - KUBECONFIG=/home/devgordon/.kube/config
       - WORKSPACE=/workspace

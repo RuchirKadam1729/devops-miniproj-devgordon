@@ -18,6 +18,7 @@
     --purple: #bc8cff;
     --orange: #ffa657;
     --card-bg: #1c2128;
+    --sidebar-w: 230px;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,19 +30,23 @@
     height: 100vh;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
   }
 
+  /* ---- Header ---- */
   header {
-    padding: 12px 20px;
+    padding: 10px 16px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     background: var(--surface);
+    flex-shrink: 0;
+    z-index: 10;
   }
 
   .logo {
-    font-size: 1.1rem;
+    font-size: 1.05rem;
     font-weight: 700;
     color: var(--green);
     font-family: 'Courier New', monospace;
@@ -53,15 +58,30 @@
     border-radius: 50%;
     background: var(--green);
     animation: pulse 2s infinite;
+    flex-shrink: 0;
   }
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
   }
 
+  /* Provider badge */
+  #provider-badge {
+    font-size: 0.7rem;
+    font-family: 'Courier New', monospace;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    background: var(--bg);
+    display: none;
+  }
+  #provider-badge.groq  { color: var(--purple); border-color: rgba(188,140,255,0.3); background: rgba(188,140,255,0.06); }
+  #provider-badge.ollama { color: var(--blue);  border-color: rgba(88,166,255,0.3);  background: rgba(88,166,255,0.06); }
+
   .header-actions {
     margin-left: auto;
-    display: flex; gap: 8px;
+    display: flex; gap: 8px; align-items: center;
   }
 
   button.secondary {
@@ -75,6 +95,133 @@
   }
   button.secondary:hover { border-color: var(--text-muted); color: var(--text); }
 
+  /* ---- Main layout: sidebar + chat ---- */
+  #main-content {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* ---- Sidebar ---- */
+  #sidebar {
+    width: var(--sidebar-w);
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  #sidebar-header {
+    padding: 10px 12px 8px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #sidebar-header span {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+    flex: 1;
+  }
+  .sidebar-icon-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.85rem;
+    padding: 2px 4px;
+    border-radius: 4px;
+    line-height: 1;
+  }
+  .sidebar-icon-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+
+  #sidebar-new {
+    margin: 8px;
+    padding: 7px 10px;
+    background: rgba(63,185,80,0.1);
+    border: 1px solid rgba(63,185,80,0.25);
+    color: var(--green);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-align: center;
+    flex-shrink: 0;
+    transition: background 0.15s;
+  }
+  #sidebar-new:hover { background: rgba(63,185,80,0.18); }
+
+  #sidebar-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+  }
+
+  .conv-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(48,54,61,0.5);
+    position: relative;
+    transition: background 0.1s;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .conv-item:hover { background: rgba(255,255,255,0.04); }
+  .conv-item.active { background: rgba(88,166,255,0.08); border-left: 2px solid var(--blue); }
+  .conv-item .conv-title {
+    font-size: 0.8rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 20px;
+  }
+  .conv-item .conv-meta {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    display: flex;
+    gap: 6px;
+  }
+  .conv-item .conv-delete {
+    position: absolute;
+    top: 8px; right: 6px;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.15s;
+    line-height: 1;
+  }
+  .conv-item:hover .conv-delete { opacity: 1; }
+  .conv-item .conv-delete:hover { color: var(--red); background: rgba(248,81,73,0.1); }
+
+  .sidebar-empty {
+    padding: 24px 12px;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+  .sidebar-empty code { color: var(--text-muted); font-size: 0.75rem; }
+
+  /* ---- Chat area ---- */
+  #chat-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
   #chat {
     flex: 1;
     overflow-y: auto;
@@ -84,7 +231,7 @@
     gap: 16px;
   }
 
-  .message { max-width: 760px; width: 100%; }
+  .message { max-width: 720px; width: 100%; }
   .message.user { margin-left: auto; }
 
   .message-bubble {
@@ -118,7 +265,7 @@
     border: 1px solid var(--yellow);
     border-radius: 8px;
     overflow: hidden;
-    max-width: 760px;
+    max-width: 720px;
   }
   .approval-card.scan-error { border-color: var(--red); }
   .approval-card.scan-clean { border-color: var(--green); }
@@ -242,7 +389,7 @@
     border: 1px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
-    max-width: 760px;
+    max-width: 720px;
   }
   .result-header {
     padding: 8px 16px;
@@ -265,12 +412,13 @@
 
   /* ---- Input area ---- */
   #input-area {
-    padding: 16px 20px;
+    padding: 14px 16px;
     border-top: 1px solid var(--border);
     background: var(--surface);
     display: flex;
     gap: 10px;
     align-items: flex-end;
+    flex-shrink: 0;
   }
 
   #message-input {
@@ -347,11 +495,11 @@
     transition: background 0.15s, color 0.15s;
   }
   .mode-toggle button:last-child { border-right: none; }
-  .mode-toggle button.active-always  { background: rgba(63,185,80,0.12);  color: var(--green);    font-weight: 700; }
+  .mode-toggle button.active-always  { background: rgba(63,185,80,0.12);  color: var(--green);  font-weight: 700; }
   .mode-toggle button.active-writes  { background: rgba(210,153,34,0.15); color: var(--yellow); font-weight: 700; }
-  .mode-toggle button.active-never   { background: rgba(248,81,73,0.15);  color: var(--red);  font-weight: 700; }
+  .mode-toggle button.active-never   { background: rgba(248,81,73,0.15);  color: var(--red);    font-weight: 700; }
 
-  /* ---- Execution bubble (combined interpretation + expandable boxes) ---- */
+  /* ---- Execution bubble ---- */
   .exec-bubble {
     background: var(--card-bg);
     border: 1px solid var(--border);
@@ -364,9 +512,7 @@
     line-height: 1.6;
     border-bottom: 1px solid var(--border);
   }
-  .exec-details {
-    border-bottom: 1px solid var(--border);
-  }
+  .exec-details { border-bottom: 1px solid var(--border); }
   .exec-details:last-child { border-bottom: none; }
   .exec-details summary {
     padding: 7px 16px;
@@ -407,8 +553,8 @@
     overflow-y: auto;
     background: #0d1117;
   }
-  .exec-details-body.cmd  { color: var(--orange); }
-  .exec-details-body.out  { color: #8b949e; }
+  .exec-details-body.cmd { color: var(--orange); }
+  .exec-details-body.out { color: #8b949e; }
 
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
@@ -437,17 +583,10 @@
     overflow-x: auto;
     margin-bottom: 0.6em;
   }
-  .md-body pre code {
-    background: none;
-    padding: 0;
-    font-size: 0.8rem;
-    color: #8b949e;
-  }
+  .md-body pre code { background: none; padding: 0; font-size: 0.8rem; color: #8b949e; }
   .md-body h1, .md-body h2, .md-body h3 {
-    color: var(--text);
-    font-weight: 700;
-    margin-bottom: 0.4em;
-    margin-top: 0.6em;
+    color: var(--text); font-weight: 700;
+    margin-bottom: 0.4em; margin-top: 0.6em;
   }
   .md-body h1 { font-size: 1.1em; }
   .md-body h2 { font-size: 1em; }
@@ -459,6 +598,112 @@
     margin-bottom: 0.6em;
   }
   .md-body hr { border: none; border-top: 1px solid var(--border); margin: 0.6em 0; }
+
+  /* ---- Settings panel ---- */
+  #settings-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    width: 30px; height: 30px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.95rem;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  #settings-btn:hover { color: var(--text); border-color: var(--text-muted); }
+  #settings-btn.active { color: var(--blue); border-color: var(--blue); background: rgba(88,166,255,0.08); }
+
+  #settings-panel {
+    position: absolute;
+    top: 49px; right: 12px;
+    width: 340px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    z-index: 100;
+    padding: 16px;
+    display: none;
+    flex-direction: column;
+    gap: 14px;
+  }
+  #settings-panel.open { display: flex; }
+
+  .settings-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .settings-row { display: flex; flex-direction: column; gap: 5px; }
+
+  .settings-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 600;
+  }
+
+  .settings-presets {
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .preset-btn {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    padding: 4px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 0.75rem;
+    transition: all 0.1s;
+  }
+  .preset-btn:hover { color: var(--text); border-color: var(--text-muted); }
+  .preset-btn.selected { border-color: var(--blue); color: var(--blue); background: rgba(88,166,255,0.08); }
+
+  .settings-input {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 7px 10px;
+    font-size: 0.82rem;
+    font-family: 'Courier New', monospace;
+    width: 100%;
+  }
+  .settings-input:focus { outline: none; border-color: var(--blue); }
+  .settings-input::placeholder { color: var(--text-muted); }
+
+  .settings-input.key-field { font-family: inherit; letter-spacing: 0.04em; }
+
+  #settings-key-row { display: none; }
+
+  #settings-apply {
+    background: var(--blue);
+    color: #000;
+    border: none;
+    padding: 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 0.82rem;
+    width: 100%;
+    margin-top: 2px;
+  }
+  #settings-apply:hover { background: #79b8ff; }
+
+  #settings-status {
+    font-size: 0.75rem;
+    text-align: center;
+    min-height: 1em;
+    color: var(--text-muted);
+  }
+  #settings-status.ok  { color: var(--green); }
+  #settings-status.err { color: var(--red); }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -467,6 +712,7 @@
 <header>
   <div class="status-dot" id="status-dot"></div>
   <div class="logo">DevGordon <span>// local DevOps agent</span></div>
+  <span id="provider-badge"></span>
 
   <div class="header-actions">
     <div class="mode-toggle" id="mode-toggle" title="Approval mode">
@@ -474,39 +720,94 @@
       <button onclick="setMode('writes')"  id="mode-writes">Writes only</button>
       <button onclick="setMode('never')"   id="mode-never">Auto-run</button>
     </div>
-    <button class="secondary" onclick="resetConversation()">New conversation</button>
+    <button id="settings-btn" title="LLM server settings" onclick="toggleSettings()">⚙</button>
   </div>
 </header>
 
-<div id="chat">
-  <div class="message assistant">
-    <div class="message-meta">DevGordon</div>
-    <div class="message-bubble">
-      Hey. I can interact with your DevOps stack — Jenkins, Ansible, Kubernetes, Docker.<br><br>
-      I'll <strong>explain what I'm about to do</strong> and show you the exact command or playbook before anything runs. You approve or reject. I also scan generated code for security issues before execution.<br><br>
-      Try: <em>"what pods are running?"</em> or <em>"trigger the build job"</em> or <em>"show me recent Jenkins builds"</em>
+<!-- Settings panel (absolutely positioned below header) -->
+<div id="settings-panel">
+  <div class="settings-title">LLM Server</div>
+
+  <div class="settings-row">
+    <div class="settings-label">Preset</div>
+    <div class="settings-presets">
+      <button class="preset-btn selected" id="preset-local"  onclick="applyPreset('local')">Local Ollama</button>
+      <button class="preset-btn"          id="preset-groq"   onclick="applyPreset('groq')">Groq</button>
+      <button class="preset-btn"          id="preset-remote" onclick="applyPreset('remote')">Remote Ollama</button>
+      <button class="preset-btn"          id="preset-custom" onclick="applyPreset('custom')">Custom</button>
     </div>
   </div>
+
+  <div class="settings-row">
+    <div class="settings-label">Server URL</div>
+    <input id="settings-url"   class="settings-input" type="text" placeholder="http://ollama:11434" />
+  </div>
+
+  <div class="settings-row">
+    <div class="settings-label">Model</div>
+    <input id="settings-model" class="settings-input" type="text" placeholder="qwen3:8b" />
+  </div>
+
+  <div class="settings-row" id="settings-key-row">
+    <div class="settings-label">API Key</div>
+    <input id="settings-key" class="settings-input key-field" type="password" placeholder="sk-..." />
+  </div>
+
+  <button id="settings-apply" onclick="applyServerConfig()">Apply</button>
+  <div id="settings-status"></div>
 </div>
 
-<div id="input-area">
-  <textarea
-    id="message-input"
-    placeholder="Ask DevGordon to do something..."
-    rows="1"
-    onkeydown="handleKeydown(event)"
-    oninput="autoResize(this)"
-  ></textarea>
-  <button id="send-btn" onclick="sendMessage()">Send</button>
-</div>
+<div id="main-content">
+
+  <!-- ===== Sidebar ===== -->
+  <aside id="sidebar">
+    <div id="sidebar-header">
+      <span>Conversations</span>
+      <button class="sidebar-icon-btn" title="Refresh" onclick="loadSidebar()">↺</button>
+    </div>
+    <button id="sidebar-new" onclick="resetConversation()">+ New conversation</button>
+    <div id="sidebar-list">
+      <div class="sidebar-empty">No saved conversations yet.<br><br>Start chatting — sessions are saved automatically when you start a new one.</div>
+    </div>
+  </aside>
+
+  <!-- ===== Chat area ===== -->
+  <div id="chat-area">
+    <div id="chat">
+      <div class="message assistant">
+        <div class="message-meta">DevGordon</div>
+        <div class="message-bubble">
+          Hey. I can interact with your DevOps stack — Jenkins, Ansible, Kubernetes, Docker.<br><br>
+          I'll <strong>explain what I'm about to do</strong> and show you the exact command or playbook before anything runs. You approve or reject. I also scan generated code for security issues before execution.<br><br>
+          Try: <em>"what pods are running?"</em> or <em>"trigger the build job"</em> or <em>"show me recent Jenkins builds"</em>
+        </div>
+      </div>
+    </div>
+
+    <div id="input-area">
+      <textarea
+        id="message-input"
+        placeholder="Ask DevGordon to do something..."
+        rows="1"
+        onkeydown="handleKeydown(event)"
+        oninput="autoResize(this)"
+      ></textarea>
+      <button id="send-btn" onclick="sendMessage()">Send</button>
+    </div>
+  </div>
+
+</div><!-- #main-content -->
 
 <script>
 // ---- State ----
 let isWaiting = false;
 let pendingAction = null;
 let currentMode = 'always';
+let activeSidebarId = null;  // currently loaded conversation id (null = fresh session)
 
-// ---- Approval mode ----
+// ============================================================
+// Approval mode
+// ============================================================
 async function setMode(mode) {
   await fetch('/approval-mode', {
     method: 'POST',
@@ -514,26 +815,125 @@ async function setMode(mode) {
     body: JSON.stringify({mode})
   });
   currentMode = mode;
+  _highlightMode(mode);
+}
+
+function _highlightMode(mode) {
   document.querySelectorAll('.mode-toggle button').forEach(b => {
     b.className = '';
     if (b.id === 'mode-' + mode) b.className = 'active-' + mode;
   });
 }
 
-// Load current mode on startup
 async function loadMode() {
   try {
     const r = await fetch('/approval-mode');
     const d = await r.json();
     currentMode = d.mode || 'always';
-    document.querySelectorAll('.mode-toggle button').forEach(b => {
-      b.className = '';
-      if (b.id === 'mode-' + currentMode) b.className = 'active-' + currentMode;
-    });
+    _highlightMode(currentMode);
   } catch {}
 }
 
-// ---- Core send ----
+// ============================================================
+// Sidebar — conversation history
+// ============================================================
+async function loadSidebar() {
+  try {
+    const r = await fetch('/conversations');
+    if (!r.ok) return;
+    const { conversations } = await r.json();
+    renderSidebar(conversations);
+  } catch {}
+}
+
+function renderSidebar(conversations) {
+  const list = document.getElementById('sidebar-list');
+  if (!conversations || conversations.length === 0) {
+    list.innerHTML = '<div class="sidebar-empty">No saved conversations yet.<br><br>Start chatting — sessions are saved when you start a new one.</div>';
+    return;
+  }
+
+  list.innerHTML = conversations.map(c => {
+    const isActive = c.id === activeSidebarId;
+    const date = _relativeTime(c.updated_at);
+    const msgCount = c.message_count || 0;
+    const title = escapeHtml(c.title || 'Untitled');
+    return `
+      <div class="conv-item${isActive ? ' active' : ''}" onclick="restoreConversation('${c.id}', this)">
+        <div class="conv-title" title="${title}">${title}</div>
+        <div class="conv-meta">
+          <span>${date}</span>
+          <span>${msgCount} msg${msgCount !== 1 ? 's' : ''}</span>
+        </div>
+        <button class="conv-delete" title="Delete" onclick="deleteConversation(event, '${c.id}')">✕</button>
+      </div>
+    `;
+  }).join('');
+}
+
+async function restoreConversation(convId, itemEl) {
+  if (isWaiting) return;
+
+  // Optimistic active highlight
+  document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
+  itemEl.classList.add('active');
+  activeSidebarId = convId;
+
+  try {
+    const r = await fetch(`/conversations/${convId}/restore`, { method: 'POST' });
+    if (!r.ok) { alert('Could not restore conversation.'); return; }
+    const data = await r.json();
+
+    // Re-render the chat from restored history
+    const histResp = await fetch('/history');
+    const { history } = await histResp.json();
+    replayHistoryIntoChat(history, data.title || 'Untitled');
+
+    pendingAction = null;
+    setWaiting(false);
+    await loadSidebar();  // refresh to show active state
+  } catch (err) {
+    appendAssistantMessage(`⚠ Could not load conversation: ${err.message}`);
+  }
+}
+
+function replayHistoryIntoChat(history, title) {
+  const chat = document.getElementById('chat');
+  chat.innerHTML = `
+    <div class="message assistant">
+      <div class="message-meta">DevGordon</div>
+      <div class="message-bubble" style="border-color:rgba(88,166,255,0.25)">
+        📂 Loaded: <strong>${escapeHtml(title)}</strong>
+      </div>
+    </div>
+  `;
+
+  for (const m of history) {
+    if (m.role === 'user') {
+      appendUserMessage(m.content || '');
+    } else if (m.role === 'assistant' && m.content) {
+      appendAssistantMessage(m.content);
+    }
+    // tool / system turns are skipped — they're not useful to display
+  }
+  scrollToBottom();
+}
+
+async function deleteConversation(e, convId) {
+  e.stopPropagation();
+  if (!confirm('Delete this conversation?')) return;
+
+  await fetch(`/conversations/${convId}`, { method: 'DELETE' });
+
+  if (activeSidebarId === convId) {
+    activeSidebarId = null;
+  }
+  loadSidebar();
+}
+
+// ============================================================
+// Core send
+// ============================================================
 async function sendMessage(overrideText) {
   const input = document.getElementById('message-input');
   const text = overrideText || input.value.trim();
@@ -579,7 +979,9 @@ async function sendMessage(overrideText) {
   setWaiting(false);
 }
 
-// ---- Approval actions ----
+// ============================================================
+// Approval actions
+// ============================================================
 async function approveAction(callId) {
   if (!pendingAction) return;
   disableCardButtons(callId);
@@ -627,9 +1029,7 @@ async function rejectAction(callId) {
     });
     const data = await resp.json();
     loadingEl.remove();
-    if (data.suggestion) {
-      appendAssistantMessage(data.suggestion);
-    }
+    if (data.suggestion) appendAssistantMessage(data.suggestion);
   } catch (err) {
     loadingEl.remove();
     appendAssistantMessage('Understood — rejected. What would you like to do instead?');
@@ -648,7 +1048,9 @@ function modifyAction(callId) {
   pendingAction = null;
 }
 
-// ---- DOM helpers ----
+// ============================================================
+// DOM helpers
+// ============================================================
 function appendUserMessage(text) {
   const chat = document.getElementById('chat');
   const el = document.createElement('div');
@@ -707,8 +1109,8 @@ function appendApprovalCard(data) {
       ${scanHtml}
       <div class="card-actions">
         <button class="approve" onclick="approveAction('${data.call_id}')">✓ Approve</button>
-        <button class="reject" onclick="rejectAction('${data.call_id}')">✗ Reject</button>
-        <button class="modify" onclick="modifyAction('${data.call_id}')">✎ Ask to modify</button>
+        <button class="reject"  onclick="rejectAction('${data.call_id}')">✗ Reject</button>
+        <button class="modify"  onclick="modifyAction('${data.call_id}')">✎ Ask to modify</button>
       </div>
     </div>
   `;
@@ -766,7 +1168,9 @@ function disableCardButtons(callId) {
   card.querySelectorAll('button').forEach(b => b.disabled = true);
 }
 
-// ---- Utilities ----
+// ============================================================
+// Utilities
+// ============================================================
 function formatArgsForDisplay(toolName, args) {
   if (toolName === 'run_ansible_playbook') {
     return args.playbook_content || JSON.stringify(args, null, 2);
@@ -784,7 +1188,6 @@ function formatArgsForDisplay(toolName, args) {
   return JSON.stringify(args, null, 2);
 }
 
-// Configure marked once: single newlines → <br>
 marked.use({ breaks: true, mangle: false, headerIds: false });
 
 function formatMessage(text) {
@@ -823,8 +1226,34 @@ function handleKeydown(e) {
   }
 }
 
+function _relativeTime(isoStr) {
+  if (!isoStr) return '';
+  const diff = Date.now() - new Date(isoStr).getTime();
+  const mins  = Math.floor(diff / 60000);
+  const hours = Math.floor(diff / 3600000);
+  const days  = Math.floor(diff / 86400000);
+  if (mins  <  1) return 'just now';
+  if (mins  < 60) return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days  <  7) return `${days}d ago`;
+  return new Date(isoStr).toLocaleDateString();
+}
+
+// ============================================================
+// Reset / New conversation
+// ============================================================
 async function resetConversation() {
-  await fetch('/reset', {method: 'POST'});
+  const resp = await fetch('/reset', {method: 'POST'});
+  const data = await resp.json().catch(() => ({}));
+
+  // If backend saved the old session, refresh sidebar so it appears
+  if (data.saved_as) {
+    await loadSidebar();
+  }
+
+  activeSidebarId = null;
+  document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
+
   document.getElementById('chat').innerHTML = `
     <div class="message assistant">
       <div class="message-meta">DevGordon</div>
@@ -834,25 +1263,149 @@ async function resetConversation() {
   pendingAction = null;
 }
 
-// ---- Check backend on load ----
-window.addEventListener('load', async () => {
-  loadMode();
+// ============================================================
+// Settings panel — LLM server config
+// ============================================================
+const PRESETS = {
+  local:  { url: 'http://ollama:11434',            model: 'qwen3:8b',                  provider: 'ollama', key: false },
+  groq:   { url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile',   provider: 'groq',   key: true  },
+  remote: { url: 'http://192.168.1.x:11434',       model: 'qwen3:8b',                  provider: 'ollama', key: false },
+  custom: { url: '',                               model: '',                           provider: 'ollama', key: false },
+};
+
+let activePreset = 'local';
+
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  const btn   = document.getElementById('settings-btn');
+  const open  = panel.classList.toggle('open');
+  btn.classList.toggle('active', open);
+}
+
+function applyPreset(name) {
+  activePreset = name;
+  const p = PRESETS[name];
+
+  document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('selected'));
+  document.getElementById('preset-' + name).classList.add('selected');
+
+  if (p.url)   document.getElementById('settings-url').value   = p.url;
+  if (p.model) document.getElementById('settings-model').value = p.model;
+  document.getElementById('settings-key-row').style.display = p.key ? 'flex' : 'none';
+  document.getElementById('settings-key').value = '';
+  document.getElementById('settings-status').textContent = '';
+  document.getElementById('settings-status').className = '';
+}
+
+async function loadServerConfig() {
+  try {
+    const r = await fetch('/server-config');
+    if (!r.ok) return;
+    const d = await r.json();
+
+    document.getElementById('settings-url').value   = d.ollama_url  || '';
+    document.getElementById('settings-model').value = d.provider === 'groq' ? (d.groq_model || '') : (d.ollama_model || '');
+
+    // Best-guess preset highlight
+    if (d.provider === 'groq') {
+      applyPreset('groq');
+    } else if ((d.ollama_url || '').includes('localhost') || (d.ollama_url || '').includes('ollama:')) {
+      applyPreset('local');
+    } else {
+      applyPreset('remote');
+    }
+  } catch {}
+}
+
+async function applyServerConfig() {
+  const url     = document.getElementById('settings-url').value.trim();
+  const model   = document.getElementById('settings-model').value.trim();
+  const api_key = document.getElementById('settings-key').value.trim();
+  const status  = document.getElementById('settings-status');
+
+  // Infer provider from preset or URL
+  let provider = 'ollama';
+  if (activePreset === 'groq' || url.includes('groq.com') || url.includes('openai.com')) {
+    provider = 'groq';
+  }
+
+  status.textContent = 'Applying…';
+  status.className   = '';
+
+  try {
+    const resp = await fetch('/server-config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ provider, url, model, api_key })
+    });
+    const data = await resp.json();
+
+    if (data.status === 'ok') {
+      status.textContent = `✓ Connected — ${data.provider} · ${data.model}`;
+      status.className   = 'ok';
+      // Refresh the provider badge in the header
+      await checkHealth();
+    } else {
+      status.textContent = data.error || 'Error applying config';
+      status.className   = 'err';
+    }
+  } catch (err) {
+    status.textContent = `✗ ${err.message}`;
+    status.className   = 'err';
+  }
+}
+
+// Close settings panel when clicking outside
+document.addEventListener('click', (e) => {
+  const panel = document.getElementById('settings-panel');
+  const btn   = document.getElementById('settings-btn');
+  if (panel.classList.contains('open') && !panel.contains(e.target) && e.target !== btn) {
+    panel.classList.remove('open');
+    btn.classList.remove('active');
+  }
+});
+
+// ============================================================
+// Health check + provider badge
+// ============================================================
+async function checkHealth() {
   try {
     const resp = await fetch('/health');
     const data = await resp.json();
-    if (!resp.ok) throw new Error();
 
-    if (data.claude_api !== 'configured') {
-      document.getElementById('status-dot').style.background = 'var(--yellow)';
-      document.getElementById('status-dot').style.animation = 'none';
+    const dot = document.getElementById('status-dot');
+    const badge = document.getElementById('provider-badge');
+
+    if (data.status === 'ok') {
+      dot.style.background = 'var(--green)';
+      dot.style.animation = '';
     } else {
-      document.getElementById('status-dot').style.background = 'var(--green)';
+      dot.style.background = 'var(--yellow)';
+      dot.style.animation = 'none';
     }
+
+    // Show provider badge
+    const provider = data.provider || 'ollama';
+    const model    = data.model_selected || '';
+    badge.textContent = `${provider} · ${model}`;
+    badge.className   = provider;
+    badge.style.display = 'inline-block';
+
   } catch {
     document.getElementById('status-dot').style.background = 'var(--red)';
     document.getElementById('status-dot').style.animation = 'none';
     appendAssistantMessage('⚠ Cannot reach backend. Make sure the FastAPI server is running on port 8000.');
   }
+}
+
+// ============================================================
+// Init
+// ============================================================
+window.addEventListener('load', async () => {
+  await loadMode();
+  await checkHealth();
+  await loadSidebar();
+  await loadServerConfig();
 });
 </script>
 </body>

