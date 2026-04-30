@@ -6,7 +6,7 @@
 # the model (qwen3:8b by default) when the container starts.
 
 MODEL_NAME="${OLLAMA_MODEL:-qwen3:8b}"
-OLLAMA_HOST="http://localhost:11434"
+OLLAMA_HOST="http://host.docker.internal:11434"
 
 echo "[ollama-init] Starting Ollama server..."
 

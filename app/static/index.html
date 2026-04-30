@@ -65,7 +65,6 @@
     50% { opacity: 0.4; }
   }
 
-  /* Provider badge */
   #provider-badge {
     font-size: 0.7rem;
     font-family: 'Courier New', monospace;
@@ -76,8 +75,8 @@
     background: var(--bg);
     display: none;
   }
-  #provider-badge.groq  { color: var(--purple); border-color: rgba(188,140,255,0.3); background: rgba(188,140,255,0.06); }
-  #provider-badge.ollama { color: var(--blue);  border-color: rgba(88,166,255,0.3);  background: rgba(88,166,255,0.06); }
+  #provider-badge.groq   { color: var(--purple); border-color: rgba(188,140,255,0.3); background: rgba(188,140,255,0.06); }
+  #provider-badge.ollama { color: var(--blue);   border-color: rgba(88,166,255,0.3);  background: rgba(88,166,255,0.06); }
 
   .header-actions {
     margin-left: auto;
@@ -95,7 +94,7 @@
   }
   button.secondary:hover { border-color: var(--text-muted); color: var(--text); }
 
-  /* ---- Main layout: sidebar + chat ---- */
+  /* ---- Main layout ---- */
   #main-content {
     flex: 1;
     display: flex;
@@ -212,7 +211,6 @@
     color: var(--text-muted);
     line-height: 1.5;
   }
-  .sidebar-empty code { color: var(--text-muted); font-size: 0.75rem; }
 
   /* ---- Chat area ---- */
   #chat-area {
@@ -266,9 +264,22 @@
     border-radius: 8px;
     overflow: hidden;
     max-width: 720px;
+    /* No height transitions — they cause the "shrinking" glitch */
   }
   .approval-card.scan-error { border-color: var(--red); }
   .approval-card.scan-clean { border-color: var(--green); }
+
+  /* Resolved state: collapse card body, show just a strip */
+  .approval-card.resolved {
+    border-color: var(--border) !important;
+  }
+  .approval-card.resolved .card-body { display: none; }
+  .approval-card.resolved .card-header {
+    background: rgba(48,54,61,0.4) !important;
+    color: var(--text-muted) !important;
+    border-bottom: none !important;
+    font-weight: 400;
+  }
 
   .card-header {
     background: rgba(210, 153, 34, 0.1);
@@ -344,7 +355,7 @@
   }
   .scan-issue { padding-left: 8px; }
 
-  .card-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
+  .card-actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; min-height: 38px; align-items: center; }
 
   button.approve {
     background: var(--green);
@@ -560,7 +571,7 @@
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-  /* ---- Markdown rendered output ---- */
+  /* ---- Markdown ---- */
   .md-body p { margin-bottom: 0.6em; }
   .md-body p:last-child { margin-bottom: 0; }
   .md-body ul, .md-body ol { padding-left: 1.4em; margin-bottom: 0.6em; }
@@ -618,7 +629,7 @@
   #settings-panel {
     position: absolute;
     top: 49px; right: 12px;
-    width: 360px;
+    width: 370px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -641,6 +652,17 @@
     letter-spacing: 0.08em;
     padding-bottom: 8px;
     border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+  }
+  .settings-title small {
+    font-size: 0.68rem;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: 0;
+    color: var(--text-muted);
+    opacity: 0.7;
   }
 
   .settings-row { display: flex; flex-direction: column; gap: 5px; }
@@ -679,14 +701,11 @@
   }
   .settings-input:focus { outline: none; border-color: var(--blue); }
   .settings-input::placeholder { color: var(--text-muted); }
-
   .settings-input.key-field { font-family: inherit; letter-spacing: 0.04em; }
 
   #settings-key-row { display: none; }
 
-  #settings-apply {
-    background: var(--blue);
-    color: #000;
+  .settings-apply-btn {
     border: none;
     padding: 8px;
     border-radius: 6px;
@@ -696,29 +715,53 @@
     width: 100%;
     margin-top: 2px;
   }
-  #settings-apply:hover { background: #79b8ff; }
-
-  #settings-apply-infra {
+  .settings-apply-btn.primary { background: var(--blue); color: #000; }
+  .settings-apply-btn.primary:hover { background: #79b8ff; }
+  .settings-apply-btn.secondary-btn {
     background: var(--surface);
     color: var(--text);
     border: 1px solid var(--border);
-    padding: 8px;
-    border-radius: 6px;
-    cursor: pointer;
-    font-weight: 600;
-    font-size: 0.82rem;
-    width: 100%;
   }
-  #settings-apply-infra:hover { border-color: var(--text-muted); }
+  .settings-apply-btn.secondary-btn:hover { border-color: var(--text-muted); }
 
-  #settings-status-infra {
+  .settings-status {
     font-size: 0.75rem;
     text-align: center;
     min-height: 1em;
     color: var(--text-muted);
   }
-  #settings-status-infra.ok  { color: var(--green); }
-  #settings-status-infra.err { color: var(--red); }
+  .settings-status.ok  { color: var(--green); }
+  .settings-status.err { color: var(--red); }
+
+  /* Secrets key status indicators */
+  .secrets-key-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+  }
+  .secrets-key-row .key-name {
+    color: var(--text-muted);
+    flex: 1;
+  }
+  .secrets-key-row .key-badge {
+    font-size: 0.7rem;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-weight: 700;
+  }
+  .key-badge.set   { background: rgba(63,185,80,0.15); color: var(--green);  border: 1px solid rgba(63,185,80,0.3); }
+  .key-badge.unset { background: rgba(125,133,144,0.1); color: var(--text-muted); border: 1px solid var(--border); }
+  .key-delete-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    cursor: pointer;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  .key-delete-btn:hover { color: var(--red); background: rgba(248,81,73,0.1); }
 </style>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -735,12 +778,14 @@
       <button onclick="setMode('writes')"  id="mode-writes">Writes only</button>
       <button onclick="setMode('never')"   id="mode-never">Auto-run</button>
     </div>
-    <button id="settings-btn" title="LLM server settings" onclick="toggleSettings()">⚙</button>
+    <button id="settings-btn" title="Settings" onclick="toggleSettings()">⚙</button>
   </div>
 </header>
 
-<!-- Settings panel (absolutely positioned below header) -->
+<!-- Settings panel -->
 <div id="settings-panel">
+
+  <!-- LLM Server -->
   <div class="settings-title">LLM Server</div>
 
   <div class="settings-row">
@@ -755,7 +800,7 @@
 
   <div class="settings-row">
     <div class="settings-label">Server URL</div>
-    <input id="settings-url"   class="settings-input" type="text" placeholder="http://ollama:11434" />
+    <input id="settings-url"   class="settings-input" type="text" placeholder="http://host.docker.internal:11434" />
   </div>
 
   <div class="settings-row">
@@ -764,13 +809,14 @@
   </div>
 
   <div class="settings-row" id="settings-key-row">
-    <div class="settings-label">API Key</div>
+    <div class="settings-label">API Key (session only — use Saved Keys below to persist)</div>
     <input id="settings-key" class="settings-input key-field" type="password" placeholder="sk-..." />
   </div>
 
-  <button id="settings-apply" onclick="applyServerConfig()">Apply</button>
-  <div id="settings-status"></div>
+  <button class="settings-apply-btn primary" onclick="applyServerConfig()">Apply</button>
+  <div id="settings-status" class="settings-status"></div>
 
+  <!-- Infrastructure -->
   <div class="settings-title" style="margin-top:4px">Infrastructure</div>
 
   <div class="settings-row">
@@ -778,7 +824,7 @@
     <input id="settings-jenkins-url" class="settings-input" type="text" placeholder="http://localhost:8080" />
   </div>
   <div class="settings-row">
-    <div class="settings-label">Jenkins API Token</div>
+    <div class="settings-label">Jenkins API Token (session only)</div>
     <input id="settings-jenkins-token" class="settings-input key-field" type="password" placeholder="token from Jenkins → Security" />
   </div>
   <div class="settings-row">
@@ -786,12 +832,40 @@
     <input id="settings-sonar-url" class="settings-input" type="text" placeholder="http://localhost:9000" />
   </div>
   <div class="settings-row">
-    <div class="settings-label">SonarQube Token</div>
+    <div class="settings-label">SonarQube Token (session only)</div>
     <input id="settings-sonar-token" class="settings-input key-field" type="password" placeholder="sqa_..." />
   </div>
 
-  <button id="settings-apply-infra" onclick="applyInfraConfig()">Apply infrastructure</button>
-  <div id="settings-status-infra"></div>
+  <button class="settings-apply-btn secondary-btn" onclick="applyInfraConfig()">Apply infrastructure</button>
+  <div id="settings-status-infra" class="settings-status"></div>
+
+  <!-- Saved Keys (persisted across resets) -->
+  <div class="settings-title" style="margin-top:4px">
+    Saved Keys
+    <small>persist across resets · stored in secrets/keys.json · gitignored</small>
+  </div>
+
+  <div id="secrets-key-status">
+    <!-- Rendered by renderSecretsStatus() -->
+    <div class="secrets-key-row"><span class="key-name">Loading…</span></div>
+  </div>
+
+  <div class="settings-row">
+    <div class="settings-label">Groq API Key</div>
+    <input id="secret-groq-key" class="settings-input key-field" type="password" placeholder="gsk_… (leave blank to keep existing)" />
+  </div>
+  <div class="settings-row">
+    <div class="settings-label">Jenkins Token</div>
+    <input id="secret-jenkins-token" class="settings-input key-field" type="password" placeholder="leave blank to keep existing" />
+  </div>
+  <div class="settings-row">
+    <div class="settings-label">SonarQube Token</div>
+    <input id="secret-sonar-token" class="settings-input key-field" type="password" placeholder="leave blank to keep existing" />
+  </div>
+
+  <button class="settings-apply-btn secondary-btn" onclick="saveSecrets()">💾 Save keys to disk</button>
+  <div id="secrets-save-status" class="settings-status"></div>
+
 </div>
 
 <div id="main-content">
@@ -804,7 +878,7 @@
     </div>
     <button id="sidebar-new" onclick="resetConversation()">+ New conversation</button>
     <div id="sidebar-list">
-      <div class="sidebar-empty">No saved conversations yet.<br><br>Start chatting — sessions are saved automatically when you start a new one.</div>
+      <div class="sidebar-empty">No saved conversations yet.<br><br>Sessions are saved automatically when you start a new one.</div>
     </div>
   </aside>
 
@@ -833,14 +907,14 @@
     </div>
   </div>
 
-</div><!-- #main-content -->
+</div>
 
 <script>
 // ---- State ----
 let isWaiting = false;
 let pendingAction = null;
 let currentMode = 'always';
-let activeSidebarId = null;  // currently loaded conversation id (null = fresh session)
+let activeSidebarId = null;
 
 // ============================================================
 // Approval mode
@@ -911,7 +985,6 @@ function renderSidebar(conversations) {
 async function restoreConversation(convId, itemEl) {
   if (isWaiting) return;
 
-  // Optimistic active highlight
   document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
   itemEl.classList.add('active');
   activeSidebarId = convId;
@@ -921,14 +994,13 @@ async function restoreConversation(convId, itemEl) {
     if (!r.ok) { alert('Could not restore conversation.'); return; }
     const data = await r.json();
 
-    // Re-render the chat from restored history
     const histResp = await fetch('/history');
     const { history } = await histResp.json();
     replayHistoryIntoChat(history, data.title || 'Untitled');
 
     pendingAction = null;
     setWaiting(false);
-    await loadSidebar();  // refresh to show active state
+    await loadSidebar();
   } catch (err) {
     appendAssistantMessage(`⚠ Could not load conversation: ${err.message}`);
   }
@@ -951,7 +1023,6 @@ function replayHistoryIntoChat(history, title) {
     } else if (m.role === 'assistant' && m.content) {
       appendAssistantMessage(m.content);
     }
-    // tool / system turns are skipped — they're not useful to display
   }
   scrollToBottom();
 }
@@ -959,12 +1030,8 @@ function replayHistoryIntoChat(history, title) {
 async function deleteConversation(e, convId) {
   e.stopPropagation();
   if (!confirm('Delete this conversation?')) return;
-
   await fetch(`/conversations/${convId}`, { method: 'DELETE' });
-
-  if (activeSidebarId === convId) {
-    activeSidebarId = null;
-  }
+  if (activeSidebarId === convId) activeSidebarId = null;
   loadSidebar();
 }
 
@@ -1021,7 +1088,7 @@ async function sendMessage(overrideText) {
 // ============================================================
 async function approveAction(callId) {
   if (!pendingAction) return;
-  disableCardButtons(callId);
+  resolveCard(callId, '✓ Approved — executing…', 'var(--green)');
   appendUserMessage('✓ Approved');
   setWaiting(true);
   const loadingEl = appendTyping();
@@ -1049,7 +1116,7 @@ async function approveAction(callId) {
 }
 
 async function rejectAction(callId) {
-  disableCardButtons(callId);
+  resolveCard(callId, '✗ Rejected', 'var(--red)');
   appendUserMessage('✗ Rejected');
   setWaiting(true);
   const loadingEl = appendTyping();
@@ -1077,12 +1144,25 @@ async function rejectAction(callId) {
 }
 
 function modifyAction(callId) {
-  disableCardButtons(callId);
+  resolveCard(callId, '✎ Modifying…', 'var(--text-muted)');
   const input = document.getElementById('message-input');
   input.value = "Actually, let's do it differently: ";
   input.focus();
   input.selectionStart = input.selectionEnd = input.value.length;
   pendingAction = null;
+}
+
+/**
+ * Collapse the approval card into a single-line resolved strip.
+ * This replaces the old disableCardButtons() which caused the "shrinking" glitch
+ * (buttons going opacity:0.4 while the card tried to re-layout).
+ */
+function resolveCard(callId, label, color) {
+  const card = document.getElementById(`card-${callId}`);
+  if (!card) return;
+  card.classList.add('resolved');
+  const hdr = card.querySelector('.card-header');
+  if (hdr) hdr.innerHTML = `<span style="color:${color}">${label}</span>`;
 }
 
 // ============================================================
@@ -1160,23 +1240,24 @@ function appendExecutionMessage(interpretation, toolName, toolArgs, result) {
   const wrapper = document.createElement('div');
   wrapper.className = 'message assistant';
 
-  const cmdDisplay = escapeHtml(formatArgsForDisplay(toolName, toolArgs));
-  const outDisplay = escapeHtml(result.output || '(no output)');
-  const badgeClass = result.success ? 'badge-ok' : 'badge-err';
-  const badgeLabel = result.success ? '✓ ok' : '✗ err';
+  const cmdDisplay  = escapeHtml(formatArgsForDisplay(toolName, toolArgs));
+  const outDisplay  = escapeHtml((result && result.output) ? result.output : '(no output)');
+  const success     = result && result.success;
+  const badgeClass  = success ? 'badge-ok' : 'badge-err';
+  const badgeLabel  = success ? '✓ ok' : '✗ err';
 
   wrapper.innerHTML = `
     <div class="message-meta">DevGordon</div>
     <div class="exec-bubble">
       <div class="exec-interpretation">${formatMessage(interpretation || '')}</div>
-      <details class="exec-details">
+      <details class="exec-details" open>
         <summary>
           Command run
           <span class="badge ${badgeClass}">${badgeLabel}</span>
         </summary>
         <div class="exec-details-body cmd">${cmdDisplay}</div>
       </details>
-      <details class="exec-details">
+      <details class="exec-details" open>
         <summary>Output / results</summary>
         <div class="exec-details-body out">${outDisplay}</div>
       </details>
@@ -1199,16 +1280,11 @@ function appendTyping() {
   return el;
 }
 
-function disableCardButtons(callId) {
-  const card = document.getElementById(`card-${callId}`);
-  if (!card) return;
-  card.querySelectorAll('button').forEach(b => b.disabled = true);
-}
-
 // ============================================================
 // Utilities
 // ============================================================
 function formatArgsForDisplay(toolName, args) {
+  if (!args) return '';
   if (toolName === 'run_ansible_playbook') {
     return args.playbook_content || JSON.stringify(args, null, 2);
   } else if (toolName === 'kubectl_command') {
@@ -1233,7 +1309,7 @@ function formatMessage(text) {
 }
 
 function escapeHtml(text) {
-  if (typeof text !== 'string') text = String(text);
+  if (typeof text !== 'string') text = String(text || '');
   return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -1248,12 +1324,11 @@ function setWaiting(val) {
 
 function scrollToBottom() {
   const chat = document.getElementById('chat');
-  // rAF ensures the newly-appended element has been painted before we scroll —
-  // without this the approval card buttons end up just off-screen.
-  requestAnimationFrame(() => {
-    const last = chat.lastElementChild;
-    if (last) last.scrollIntoView({ block: 'end', behavior: 'smooth' });
-  });
+  // Two rAF frames: first lets the DOM paint new content, second lets the
+  // browser recalculate scrollHeight before we jump to the bottom.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    chat.scrollTop = chat.scrollHeight;
+  }));
 }
 
 function autoResize(el) {
@@ -1288,10 +1363,7 @@ async function resetConversation() {
   const resp = await fetch('/reset', {method: 'POST'});
   const data = await resp.json().catch(() => ({}));
 
-  // If backend saved the old session, refresh sidebar so it appears
-  if (data.saved_as) {
-    await loadSidebar();
-  }
+  if (data.saved_as) await loadSidebar();
 
   activeSidebarId = null;
   document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
@@ -1309,10 +1381,10 @@ async function resetConversation() {
 // Settings panel — LLM server config
 // ============================================================
 const PRESETS = {
-  local:  { url: 'http://ollama:11434',            model: 'qwen3:8b',                  provider: 'ollama', key: false },
-  groq:   { url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile',   provider: 'groq',   key: true  },
-  remote: { url: 'http://192.168.1.x:11434',       model: 'qwen3:8b',                  provider: 'ollama', key: false },
-  custom: { url: '',                               model: '',                           provider: 'ollama', key: false },
+  local:  { url: 'http://host.docker.internal:11434',            model: 'qwen3:8b',                provider: 'ollama', key: false },
+  groq:   { url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', provider: 'groq',   key: true  },
+  remote: { url: 'http://192.168.1.x:11434',       model: 'qwen3:8b',                provider: 'ollama', key: false },
+  custom: { url: '',                               model: '',                         provider: 'ollama', key: false },
 };
 
 let activePreset = 'local';
@@ -1336,7 +1408,7 @@ function applyPreset(name) {
   document.getElementById('settings-key-row').style.display = p.key ? 'flex' : 'none';
   document.getElementById('settings-key').value = '';
   document.getElementById('settings-status').textContent = '';
-  document.getElementById('settings-status').className = '';
+  document.getElementById('settings-status').className = 'settings-status';
 }
 
 async function loadServerConfig() {
@@ -1348,10 +1420,9 @@ async function loadServerConfig() {
     document.getElementById('settings-url').value   = d.ollama_url  || '';
     document.getElementById('settings-model').value = d.provider === 'groq' ? (d.groq_model || '') : (d.ollama_model || '');
 
-    if (d.jenkins_url)  document.getElementById('settings-jenkins-url').value = d.jenkins_url;
-    if (d.sonar_url)    document.getElementById('settings-sonar-url').value   = d.sonar_url;
+    if (d.jenkins_url) document.getElementById('settings-jenkins-url').value = d.jenkins_url;
+    if (d.sonar_url)   document.getElementById('settings-sonar-url').value   = d.sonar_url;
 
-    // Best-guess preset highlight
     if (d.provider === 'groq') {
       applyPreset('groq');
     } else if ((d.ollama_url || '').includes('localhost') || (d.ollama_url || '').includes('ollama:') || (d.ollama_url || '').includes('host.docker')) {
@@ -1370,7 +1441,7 @@ async function applyInfraConfig() {
   const status        = document.getElementById('settings-status-infra');
 
   status.textContent = 'Applying…';
-  status.className   = '';
+  status.className   = 'settings-status';
 
   try {
     const resp = await fetch('/server-config', {
@@ -1385,14 +1456,14 @@ async function applyInfraConfig() {
       if (data.jenkins_url) parts.push('Jenkins ✓');
       if (data.sonar_url)   parts.push('Sonar ✓');
       status.textContent = parts.length ? parts.join('  ') : '✓ Saved';
-      status.className   = 'ok';
+      status.className   = 'settings-status ok';
     } else {
       status.textContent = data.error || 'Error';
-      status.className   = 'err';
+      status.className   = 'settings-status err';
     }
   } catch (err) {
     status.textContent = `✗ ${err.message}`;
-    status.className   = 'err';
+    status.className   = 'settings-status err';
   }
 }
 
@@ -1402,14 +1473,13 @@ async function applyServerConfig() {
   const api_key = document.getElementById('settings-key').value.trim();
   const status  = document.getElementById('settings-status');
 
-  // Infer provider from preset or URL
   let provider = 'ollama';
   if (activePreset === 'groq' || url.includes('groq.com') || url.includes('openai.com')) {
     provider = 'groq';
   }
 
   status.textContent = 'Applying…';
-  status.className   = '';
+  status.className   = 'settings-status';
 
   try {
     const resp = await fetch('/server-config', {
@@ -1421,20 +1491,19 @@ async function applyServerConfig() {
 
     if (data.status === 'ok') {
       status.textContent = `✓ Connected — ${data.provider} · ${data.model}`;
-      status.className   = 'ok';
-      // Refresh the provider badge in the header
+      status.className   = 'settings-status ok';
       await checkHealth();
     } else {
       status.textContent = data.error || 'Error applying config';
-      status.className   = 'err';
+      status.className   = 'settings-status err';
     }
   } catch (err) {
     status.textContent = `✗ ${err.message}`;
-    status.className   = 'err';
+    status.className   = 'settings-status err';
   }
 }
 
-// Close settings panel when clicking outside
+// Close settings when clicking outside
 document.addEventListener('click', (e) => {
   const panel = document.getElementById('settings-panel');
   const btn   = document.getElementById('settings-btn');
@@ -1445,6 +1514,95 @@ document.addEventListener('click', (e) => {
 });
 
 // ============================================================
+// Secrets — persisted keys
+// ============================================================
+let _secretsCache = { groq_api_key: false, jenkins_token: false, sonar_token: false };
+
+async function loadSecrets() {
+  try {
+    const r = await fetch('/secrets');
+    if (!r.ok) return;
+    _secretsCache = await r.json();
+    renderSecretsStatus(_secretsCache);
+  } catch {}
+}
+
+function renderSecretsStatus(s) {
+  const container = document.getElementById('secrets-key-status');
+  const rows = [
+    { key: 'groq_api_key',  label: 'Groq API Key' },
+    { key: 'jenkins_token', label: 'Jenkins Token' },
+    { key: 'sonar_token',   label: 'SonarQube Token' },
+  ];
+
+  container.innerHTML = rows.map(r => {
+    const isSet = s[r.key];
+    return `
+      <div class="secrets-key-row">
+        <span class="key-name">${r.label}</span>
+        <span class="key-badge ${isSet ? 'set' : 'unset'}">${isSet ? '✓ saved' : 'not set'}</span>
+        ${isSet ? `<button class="key-delete-btn" title="Remove this key" onclick="deleteSecret('${r.key}')">✕</button>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+async function deleteSecret(key) {
+  if (!confirm(`Remove saved ${key.replace(/_/g,' ')}?`)) return;
+  await fetch(`/secrets/${key}`, { method: 'DELETE' });
+  await loadSecrets();
+  await checkHealth();
+}
+
+async function saveSecrets() {
+  const body = {};
+  const groq    = document.getElementById('secret-groq-key').value.trim();
+  const jenkins  = document.getElementById('secret-jenkins-token').value.trim();
+  const sonar    = document.getElementById('secret-sonar-token').value.trim();
+  if (groq)    body.groq_api_key  = groq;
+  if (jenkins) body.jenkins_token = jenkins;
+  if (sonar)   body.sonar_token   = sonar;
+
+  const status = document.getElementById('secrets-save-status');
+
+  if (!Object.keys(body).length) {
+    status.textContent = 'Nothing entered — type a value first.';
+    status.className   = 'settings-status';
+    return;
+  }
+
+  status.textContent = 'Saving…';
+  status.className   = 'settings-status';
+
+  try {
+    const r = await fetch('/secrets', {
+      method:  'POST',
+      headers: {'Content-Type': 'application/json'},
+      body:    JSON.stringify(body)
+    });
+    const d = await r.json();
+
+    if (d.status === 'saved') {
+      const saved = (d.keys_saved || []).map(k => k.replace(/_/g,' ')).join(', ');
+      status.textContent = `✓ Saved: ${saved}`;
+      status.className   = 'settings-status ok';
+      // Clear inputs
+      document.getElementById('secret-groq-key').value       = '';
+      document.getElementById('secret-jenkins-token').value  = '';
+      document.getElementById('secret-sonar-token').value    = '';
+      await loadSecrets();
+      await checkHealth();
+    } else {
+      status.textContent = '✗ ' + (d.error || 'Unknown error');
+      status.className   = 'settings-status err';
+    }
+  } catch (e) {
+    status.textContent = `✗ ${e.message}`;
+    status.className   = 'settings-status err';
+  }
+}
+
+// ============================================================
 // Health check + provider badge
 // ============================================================
 async function checkHealth() {
@@ -1452,27 +1610,21 @@ async function checkHealth() {
     const resp = await fetch('/health');
     const data = await resp.json();
 
-    const dot = document.getElementById('status-dot');
+    const dot   = document.getElementById('status-dot');
     const badge = document.getElementById('provider-badge');
 
-    if (data.status === 'ok') {
-      dot.style.background = 'var(--green)';
-      dot.style.animation = '';
-    } else {
-      dot.style.background = 'var(--yellow)';
-      dot.style.animation = 'none';
-    }
+    dot.style.background = data.status === 'ok' ? 'var(--green)' : 'var(--yellow)';
+    dot.style.animation  = data.status === 'ok' ? '' : 'none';
 
-    // Show provider badge
     const provider = data.provider || 'ollama';
     const model    = data.model_selected || '';
-    badge.textContent = `${provider} · ${model}`;
-    badge.className   = provider;
+    badge.textContent   = `${provider} · ${model}`;
+    badge.className     = provider;
     badge.style.display = 'inline-block';
 
   } catch {
     document.getElementById('status-dot').style.background = 'var(--red)';
-    document.getElementById('status-dot').style.animation = 'none';
+    document.getElementById('status-dot').style.animation  = 'none';
     appendAssistantMessage('⚠ Cannot reach backend. Make sure the FastAPI server is running on port 8000.');
   }
 }
@@ -1485,6 +1637,7 @@ window.addEventListener('load', async () => {
   await checkHealth();
   await loadSidebar();
   await loadServerConfig();
+  await loadSecrets();
 });
 </script>
 </body>

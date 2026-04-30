@@ -32,15 +32,13 @@ STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ---- LLM Provider Configuration ----
-# LLM_PROVIDER: "ollama" (default, local) or "groq" (remote, faster)
 LLM_PROVIDER    = os.getenv("LLM_PROVIDER", "ollama").lower()
-OLLAMA_URL      = os.getenv("OLLAMA_URL", "http://ollama:11434")
+OLLAMA_URL      = os.getenv("OLLAMA_URL")
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL      = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 GROQ_API_BASE   = "https://api.groq.com/openai/v1"
 
-# ---- Convenience: active model name for responses ----
 def _active_model() -> str:
     return GROQ_MODEL if LLM_PROVIDER == "groq" else OLLAMA_MODEL
 
@@ -51,9 +49,6 @@ SONAR_URL     = os.getenv("SONAR_URL", "")
 SONAR_TOKEN   = os.getenv("SONAR_TOKEN", "")
 
 # ---- Approval mode ----
-# "always" → approval card for every tool call (default)
-# "writes" → auto-execute read-only tools, card only for write operations
-# "never"  → auto-execute everything, no approval cards
 _approval_mode: str = "always"
 
 READ_ONLY_TOOLS = {"kubectl_command", "jenkins_status", "docker_operation"}
@@ -84,13 +79,119 @@ def _is_read_only(tool_name: str, tool_args: dict) -> bool:
 
 
 # ============================================================================
+# SECRETS — persisted API keys that survive container resets
+# ============================================================================
+
+# Mount ./secrets:/app/secrets in docker-compose.yml
+SECRETS_DIR  = Path(os.getenv("SECRETS_DIR", "/app/secrets"))
+SECRETS_FILE = SECRETS_DIR / "keys.json"
+
+
+def _read_secrets_file() -> dict:
+    if SECRETS_FILE.exists():
+        try:
+            return json.loads(SECRETS_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _write_secrets_file(data: dict) -> None:
+    SECRETS_DIR.mkdir(parents=True, exist_ok=True)
+    SECRETS_FILE.write_text(json.dumps(data, indent=2))
+
+
+def _load_secrets_on_startup() -> None:
+    """
+    Apply any persisted keys to the in-memory globals.
+    Called once at import time so Groq / Jenkins / Sonar work without
+    the user having to re-enter keys after a container restart.
+    """
+    global GROQ_API_KEY, JENKINS_TOKEN, SONAR_TOKEN
+    s = _read_secrets_file()
+    if s.get("groq_api_key"):
+        GROQ_API_KEY = s["groq_api_key"]
+    if s.get("jenkins_token"):
+        JENKINS_TOKEN = s["jenkins_token"]
+    if s.get("sonar_token"):
+        SONAR_TOKEN = s["sonar_token"]
+
+
+_load_secrets_on_startup()
+
+
+@app.get("/secrets")
+async def get_secrets():
+    """Return which keys are saved (boolean only — never expose values)."""
+    s = _read_secrets_file()
+    return {
+        "groq_api_key":  bool(s.get("groq_api_key")),
+        "jenkins_token": bool(s.get("jenkins_token")),
+        "sonar_token":   bool(s.get("sonar_token")),
+    }
+
+
+@app.post("/secrets")
+async def save_secrets(body: dict):
+    """
+    Persist one or more keys to secrets/keys.json.
+    Only non-empty values are written; omitted keys keep their existing value.
+    Also updates the in-memory globals immediately so the running server
+    picks them up without a restart.
+    """
+    global GROQ_API_KEY, JENKINS_TOKEN, SONAR_TOKEN
+
+    existing = _read_secrets_file()
+    saved: list[str] = []
+
+    mapping = {
+        "groq_api_key":  "groq_api_key",
+        "jenkins_token": "jenkins_token",
+        "sonar_token":   "sonar_token",
+    }
+
+    for field, store_key in mapping.items():
+        val = body.get(field, "").strip()
+        if val:
+            existing[store_key] = val
+            saved.append(field)
+
+    _write_secrets_file(existing)
+
+    # Propagate into memory immediately
+    if existing.get("groq_api_key"):
+        GROQ_API_KEY = existing["groq_api_key"]
+    if existing.get("jenkins_token"):
+        JENKINS_TOKEN = existing["jenkins_token"]
+    if existing.get("sonar_token"):
+        SONAR_TOKEN = existing["sonar_token"]
+
+    return {"status": "saved", "keys_saved": saved}
+
+
+@app.delete("/secrets/{key}")
+async def delete_secret(key: str):
+    """Remove a single key from the secrets file."""
+    allowed = {"groq_api_key", "jenkins_token", "sonar_token"}
+    if key not in allowed:
+        raise HTTPException(400, f"Unknown key '{key}'")
+    existing = _read_secrets_file()
+    existing.pop(key, None)
+    _write_secrets_file(existing)
+    return {"status": "deleted", "key": key}
+
+
+# ============================================================================
 # CONVERSATION PERSISTENCE
 # ============================================================================
 
-CONVERSATIONS_DIR = Path(__file__).parent / "conversations"
+# Allow overriding via env var so the docker-compose volume mount can point
+# anywhere (fixes the /app/conversations vs /app/app/conversations mismatch).
+CONVERSATIONS_DIR = Path(
+    os.getenv("CONVERSATIONS_DIR", str(Path(__file__).parent / "conversations"))
+)
 CONVERSATIONS_DIR.mkdir(exist_ok=True)
 
-# In-memory conversation history for the active session
 _conversation_history: list[dict] = []
 _active_conversation_id: str | None = None
 
@@ -100,10 +201,7 @@ def _conversation_path(conv_id: str) -> Path:
 
 
 def _save_conversation(conv_id: str, messages: list[dict], title: str | None = None) -> dict:
-    """Persist a conversation to disk. Returns the metadata dict."""
     existing_path = _conversation_path(conv_id)
-
-    # Derive title from first user message if not provided
     if not title:
         for m in messages:
             if m.get("role") == "user" and m.get("content"):
@@ -118,7 +216,6 @@ def _save_conversation(conv_id: str, messages: list[dict], title: str | None = N
         try:
             existing = json.loads(existing_path.read_text())
             created_at = existing.get("created_at", now)
-            # Keep original title unless one is explicitly given
             if not title:
                 title = existing.get("title", title)
         except Exception:
@@ -136,11 +233,10 @@ def _save_conversation(conv_id: str, messages: list[dict], title: str | None = N
     }
 
     existing_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False))
-    return {k: v for k, v in metadata.items() if k != "messages"}  # return meta without messages
+    return {k: v for k, v in metadata.items() if k != "messages"}
 
 
 def _list_conversations() -> list[dict]:
-    """Return metadata for all saved conversations, newest first."""
     result = []
     for p in CONVERSATIONS_DIR.glob("*.json"):
         try:
@@ -177,7 +273,6 @@ def _delete_conversation(conv_id: str) -> bool:
 
 
 def _ensure_active_session():
-    """Create a new session ID if there isn't one."""
     global _active_conversation_id
     if not _active_conversation_id:
         _active_conversation_id = str(uuid.uuid4())
@@ -228,10 +323,6 @@ UNLESS the specific approval mode has been toggled."""
 # ============================================================================
 
 async def _call_ollama(messages: list[dict]) -> dict:
-    """
-    Call Ollama /api/chat endpoint with tool calling.
-    Returns Ollama-format response: {"message": {"content": "...", "tool_calls": [...]}}
-    """
     from tools import TOOL_DEFINITIONS
 
     tools = [
@@ -254,7 +345,7 @@ async def _call_ollama(messages: list[dict]) -> dict:
         "messages": messages,
         "tools": tools,
         "stream": False,
-        "options": {"think": False},
+        "think": False,   # top-level param (not inside "options"); set True if tool calls stop working
     }
 
     try:
@@ -273,16 +364,31 @@ async def _call_ollama(messages: list[dict]) -> dict:
         raise HTTPException(503, f"Ollama request error: {str(e)}")
 
 
+def _serialise_tool_calls_for_groq(tool_calls: list) -> list:
+    """
+    Groq requires tool_calls[].function.arguments to be a JSON *string*,
+    not a parsed dict.  Our normalisation layer stores them as dicts for
+    convenience, so we re-serialise here before sending history back to Groq.
+    """
+    out = []
+    for tc in tool_calls:
+        raw = tc.get("function", {}).get("arguments", {})
+        out.append({
+            "id":   tc.get("id", ""),
+            "type": "function",
+            "function": {
+                "name":      tc["function"]["name"],
+                "arguments": json.dumps(raw) if isinstance(raw, dict) else (raw or "{}"),
+            },
+        })
+    return out
+
+
 async def _call_groq(messages: list[dict]) -> dict:
-    """
-    Call Groq's OpenAI-compatible /chat/completions endpoint.
-    Normalises the response into Ollama-style format so the rest of the
-    code works identically regardless of provider.
-    """
     from tools import TOOL_DEFINITIONS
 
     if not GROQ_API_KEY:
-        raise HTTPException(503, "GROQ_API_KEY is not set. Add it to your .env file.")
+        raise HTTPException(503, "GROQ_API_KEY is not set. Add it via Settings → Saved Keys.")
 
     tools = [
         {
@@ -299,18 +405,17 @@ async def _call_groq(messages: list[dict]) -> dict:
     if not messages or messages[0].get("role") != "system":
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
 
-    # Groq doesn't accept role="tool" without a matching tool_call_id in the
-    # preceding assistant message.  Sanitise history: any "tool" turn becomes a
-    # "user" turn so the conversation stays valid.
+    # ---- Sanitise history for Groq ----
+    # • role:"tool" → role:"user"   (Groq needs tool_call_id pairing we don't track)
+    # • assistant tool_calls: re-serialise arguments as JSON strings  ← KEY FIX
     sanitised: list[dict] = []
     for m in messages:
         if m.get("role") == "tool":
             sanitised.append({"role": "user", "content": f"[tool result] {m.get('content', '')}"})
         else:
-            # Strip non-standard keys (Ollama puts tool_calls on assistant turns)
-            entry = {"role": m["role"], "content": m.get("content") or ""}
+            entry: dict = {"role": m["role"], "content": m.get("content") or ""}
             if m.get("tool_calls") and m["role"] == "assistant":
-                entry["tool_calls"] = m["tool_calls"]
+                entry["tool_calls"] = _serialise_tool_calls_for_groq(m["tool_calls"])
             sanitised.append(entry)
 
     payload = {
@@ -333,7 +438,6 @@ async def _call_groq(messages: list[dict]) -> dict:
             )
             if resp.status_code != 200:
                 raise HTTPException(503, f"Groq error ({resp.status_code}): {resp.text}")
-
             data = resp.json()
 
     except httpx.ConnectError:
@@ -345,14 +449,11 @@ async def _call_groq(messages: list[dict]) -> dict:
     except Exception as e:
         raise HTTPException(503, f"Groq request error: {str(e)}")
 
-    # --- Normalise to Ollama-style response ---
+    # ---- Normalise to Ollama-style response ----
     choice = data.get("choices", [{}])[0]
-    msg = choice.get("message", {})
+    msg    = choice.get("message", {})
     content = msg.get("content") or ""
 
-    # Groq tool_calls → Ollama-style tool_calls
-    # Groq:  [{id, type, function: {name, arguments}}]  (arguments is JSON string)
-    # Ollama: [{id, function: {name, arguments}}]        (arguments is dict)
     normalised_tool_calls = []
     for tc in msg.get("tool_calls") or []:
         raw_args = tc.get("function", {}).get("arguments", "{}")
@@ -367,14 +468,14 @@ async def _call_groq(messages: list[dict]) -> dict:
         normalised_tool_calls.append({
             "id": tc.get("id", ""),
             "function": {
-                "name": tc["function"]["name"],
-                "arguments": parsed_args,
+                "name":      tc["function"]["name"],
+                "arguments": parsed_args,   # stored as dict internally
             },
         })
 
     return {
         "message": {
-            "content": content,
+            "content":    content,
             "tool_calls": normalised_tool_calls or [],
         },
         "done": True,
@@ -382,7 +483,6 @@ async def _call_groq(messages: list[dict]) -> dict:
 
 
 async def _call_llm(messages: list[dict]) -> dict:
-    """Route to the configured LLM provider."""
     if LLM_PROVIDER == "groq":
         return await _call_groq(messages)
     return await _call_ollama(messages)
@@ -392,12 +492,12 @@ async def _interpret(history: list[dict]) -> str:
     """Ask the LLM to interpret tool output — text reply only, no tools."""
     try:
         if LLM_PROVIDER == "groq":
-            # Strip tool turns for Groq
             clean = []
             for m in history:
                 if m.get("role") == "tool":
                     clean.append({"role": "user", "content": f"[tool result] {m.get('content', '')}"})
                 else:
+                    # Strip tool_calls entirely for the interpret pass — we only want text back
                     clean.append({"role": m["role"], "content": m.get("content") or ""})
 
             async with httpx.AsyncClient(timeout=30) as client:
@@ -501,10 +601,6 @@ async def clear_history():
 
 @app.post("/reset")
 async def reset_conversation():
-    """
-    Start a new conversation.
-    Auto-saves the current session to disk before clearing if it has messages.
-    """
     global _active_conversation_id
     _ensure_active_session()
 
@@ -520,12 +616,11 @@ async def reset_conversation():
 
 
 # ============================================================================
-# SERVER CONFIG  (hot-swap URL / model / key at runtime)
+# SERVER CONFIG
 # ============================================================================
 
 @app.get("/server-config")
 async def get_server_config():
-    """Return current LLM connection and infrastructure settings (keys are masked)."""
     return {
         "provider":         LLM_PROVIDER,
         "ollama_url":       OLLAMA_URL,
@@ -541,13 +636,6 @@ async def get_server_config():
 
 @app.post("/server-config")
 async def set_server_config(body: dict):
-    """
-    Hot-swap any connection config at runtime — no restart needed.
-
-    LLM fields:      provider, url, model, api_key
-    Jenkins fields:  jenkins_url, jenkins_token
-    Sonar fields:    sonar_url, sonar_token
-    """
     global LLM_PROVIDER, OLLAMA_URL, OLLAMA_MODEL, GROQ_API_KEY, GROQ_MODEL
     global JENKINS_URL, JENKINS_TOKEN, SONAR_URL, SONAR_TOKEN
 
@@ -574,7 +662,6 @@ async def set_server_config(body: dict):
     if api_key:
         GROQ_API_KEY = api_key
 
-    # Infrastructure
     if body.get("jenkins_url"):
         JENKINS_URL = body["jenkins_url"].strip()
     if body.get("jenkins_token"):
@@ -599,10 +686,6 @@ async def set_server_config(body: dict):
 
 @app.post("/select-model")
 async def select_model(body: dict):
-    """
-    Select a model. For Ollama, verifies it's available locally.
-    For Groq, just updates the global without verification.
-    """
     global OLLAMA_MODEL, GROQ_MODEL, LLM_PROVIDER
     model_name = body.get("model", "")
     provider   = body.get("provider", LLM_PROVIDER).lower()
@@ -617,7 +700,6 @@ async def select_model(body: dict):
             GROQ_MODEL = model_name
         return {"status": "ok", "provider": "groq", "selected_model": GROQ_MODEL}
 
-    # Ollama path — verify model exists
     available: list[str] = []
     try:
         async with httpx.AsyncClient(timeout=5) as client:
@@ -641,13 +723,11 @@ async def select_model(body: dict):
 
 @app.get("/conversations")
 async def list_conversations():
-    """List all saved conversations (newest first) for the sidebar."""
     return {"conversations": _list_conversations()}
 
 
 @app.get("/conversations/{conv_id}")
 async def load_conversation(conv_id: str):
-    """Load a full saved conversation (including messages)."""
     data = _load_conversation(conv_id)
     if not data:
         raise HTTPException(404, f"Conversation '{conv_id}' not found")
@@ -656,10 +736,6 @@ async def load_conversation(conv_id: str):
 
 @app.post("/conversations/{conv_id}/restore")
 async def restore_conversation(conv_id: str):
-    """
-    Restore a saved conversation as the active session.
-    Auto-saves the current session first if it has messages.
-    """
     global _active_conversation_id
 
     data = _load_conversation(conv_id)
@@ -684,7 +760,6 @@ async def restore_conversation(conv_id: str):
 
 @app.delete("/conversations/{conv_id}")
 async def delete_conversation(conv_id: str):
-    """Delete a saved conversation from disk."""
     deleted = _delete_conversation(conv_id)
     if not deleted:
         raise HTTPException(404, f"Conversation '{conv_id}' not found")
@@ -693,7 +768,6 @@ async def delete_conversation(conv_id: str):
 
 @app.post("/conversations/save-current")
 async def save_current_conversation(body: dict = {}):
-    """Explicitly save the current in-memory session to disk."""
     _ensure_active_session()
     if not _conversation_history:
         return {"status": "nothing_to_save"}
@@ -708,15 +782,6 @@ async def save_current_conversation(body: dict = {}):
 
 @app.post("/chat")
 async def chat(msg: ChatMessage):
-    """
-    Send a message to DevGordon.
-
-    Flow:
-      1. Build conversation from server-side history (or override with msg.history)
-      2. Call LLM (Ollama or Groq) with tool schema
-      3a. No tool_calls → plain text reply
-      3b. tool_calls → run pre_scan, return pending_approval card
-    """
     _ensure_active_session()
 
     messages = list(_conversation_history) if not msg.history else list(msg.history)
@@ -733,10 +798,8 @@ async def chat(msg: ChatMessage):
     tool_calls   = message_obj.get("tool_calls", [])
     text         = message_obj.get("content", "")
 
-    # Update server-side history
     _conversation_history.append({"role": "user", "content": msg.message})
 
-    # ---- Tool call path ----
     if tool_calls:
         tool_call = tool_calls[0]
         call_id   = tool_call.get("id", "")
@@ -798,7 +861,6 @@ async def chat(msg: ChatMessage):
             "model_used": _active_model(),
         }
 
-    # ---- Plain text path ----
     _conversation_history.append({"role": "assistant", "content": text})
 
     return {
@@ -814,12 +876,6 @@ async def chat(msg: ChatMessage):
 
 @app.post("/execute")
 async def execute(body: dict):
-    """
-    Execute an approved tool call, then ask the LLM to interpret the output.
-
-    Expects: { "tool_name": "...", "tool_args": {...}, "tool_call_id": "..." }
-    Returns: { "result": {...}, "interpretation": "..." }
-    """
     from tools import execute_tool
 
     tool_name = body.get("tool_name")
@@ -846,10 +902,6 @@ async def execute(body: dict):
 
 @app.post("/reject")
 async def reject(body: dict):
-    """
-    User rejected a pending tool call.
-    Feed a tool_result back to the LLM and ask for an alternative.
-    """
     tool_call_id = body.get("tool_call_id", "")
 
     if tool_call_id:
@@ -871,7 +923,7 @@ async def reject(body: dict):
 
 
 # ============================================================================
-# MCP ENDPOINTS  (external agents / tool discovery)
+# MCP ENDPOINTS
 # ============================================================================
 
 @app.get("/mcp/tools")
@@ -905,7 +957,7 @@ async def mcp_call_tool(body: dict):
 
 
 # ============================================================================
-# CODE QUALITY  (SonarQube / ansible-lint)
+# CODE QUALITY
 # ============================================================================
 
 @app.post("/scan-code")

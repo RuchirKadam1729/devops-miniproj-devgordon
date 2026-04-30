@@ -12,12 +12,16 @@ services:
     restart: unless-stopped
     volumes:
       - ~/.kube/config:/.kube/config:ro
-      - ./:/workspace:rw          # project root — DevGordon can read/write Jenkinsfile, manifests, etc.
-      - ./conversations:/app/conversations
+      - ./:/workspace:rw             # project root — DevGordon can read/write Jenkinsfile, manifests, etc.
+      - ./conversations:/app/app/conversations   # FIX: WORKDIR is /app/app, so conversations lives here
+      - ./secrets:/app/secrets:rw    # persisted API keys — gitignored, survives container rebuilds
     environment:
       - KUBECONFIG=/home/devgordon/.kube/config
       - WORKSPACE=/workspace
       - SONAR_URL=http://sonarqube:9000
+      - CONVERSATIONS_DIR=/app/app/conversations
+      - SECRETS_DIR=/app/secrets
+
   jenkins:
     image: jenkins/jenkins:lts-jdk17
     ports:
