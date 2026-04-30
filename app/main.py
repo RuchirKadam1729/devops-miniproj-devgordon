@@ -45,8 +45,10 @@ def _active_model() -> str:
     return GROQ_MODEL if LLM_PROVIDER == "groq" else OLLAMA_MODEL
 
 # ---- Infrastructure URLs ----
-JENKINS_URL = os.getenv("JENKINS_URL")
-SONAR_URL   = os.getenv("SONAR_URL")
+JENKINS_URL   = os.getenv("JENKINS_URL", "")
+JENKINS_TOKEN = os.getenv("JENKINS_TOKEN", "")
+SONAR_URL     = os.getenv("SONAR_URL", "")
+SONAR_TOKEN   = os.getenv("SONAR_TOKEN", "")
 
 # ---- Approval mode ----
 # "always" → approval card for every tool call (default)
@@ -523,31 +525,31 @@ async def reset_conversation():
 
 @app.get("/server-config")
 async def get_server_config():
-    """Return current LLM connection settings (key is masked)."""
+    """Return current LLM connection and infrastructure settings (keys are masked)."""
     return {
-        "provider":    LLM_PROVIDER,
-        "ollama_url":  OLLAMA_URL,
-        "ollama_model": OLLAMA_MODEL,
-        "groq_model":  GROQ_MODEL,
-        "groq_key_set": bool(GROQ_API_KEY),
+        "provider":         LLM_PROVIDER,
+        "ollama_url":       OLLAMA_URL,
+        "ollama_model":     OLLAMA_MODEL,
+        "groq_model":       GROQ_MODEL,
+        "groq_key_set":     bool(GROQ_API_KEY),
+        "jenkins_url":      JENKINS_URL,
+        "jenkins_key_set":  bool(JENKINS_TOKEN),
+        "sonar_url":        SONAR_URL,
+        "sonar_key_set":    bool(SONAR_TOKEN),
     }
 
 
 @app.post("/server-config")
 async def set_server_config(body: dict):
     """
-    Hot-swap LLM connection at runtime — no restart needed.
+    Hot-swap any connection config at runtime — no restart needed.
 
-    Accepted fields (all optional — omit to leave unchanged):
-      provider   : "ollama" | "groq"
-      url        : Ollama-compatible base URL
-                   e.g. "http://localhost:11434"      (local Ollama)
-                        "https://api.groq.com/openai/v1"  (Groq)
-                        "http://192.168.1.50:11434"   (remote Ollama box)
-      model      : model name for the chosen provider
-      api_key    : bearer token (stored in memory only, never written to disk)
+    LLM fields:      provider, url, model, api_key
+    Jenkins fields:  jenkins_url, jenkins_token
+    Sonar fields:    sonar_url, sonar_token
     """
     global LLM_PROVIDER, OLLAMA_URL, OLLAMA_MODEL, GROQ_API_KEY, GROQ_MODEL
+    global JENKINS_URL, JENKINS_TOKEN, SONAR_URL, SONAR_TOKEN
 
     provider = body.get("provider", "").lower()
     url      = body.get("url",      "").strip()
@@ -558,17 +560,9 @@ async def set_server_config(body: dict):
         LLM_PROVIDER = provider
 
     if url:
-        # Auto-detect provider from URL if not explicitly given
         if not provider:
-            if "groq.com" in url or "openai.com" in url:
-                LLM_PROVIDER = "groq"
-            else:
-                LLM_PROVIDER = "ollama"
-
-        if LLM_PROVIDER == "groq":
-            # Store base URL override (not used yet — Groq URL is fixed, but future-proof)
-            pass
-        else:
+            LLM_PROVIDER = "groq" if ("groq.com" in url or "openai.com" in url) else "ollama"
+        if LLM_PROVIDER != "groq":
             OLLAMA_URL = url
 
     if model:
@@ -580,12 +574,26 @@ async def set_server_config(body: dict):
     if api_key:
         GROQ_API_KEY = api_key
 
+    # Infrastructure
+    if body.get("jenkins_url"):
+        JENKINS_URL = body["jenkins_url"].strip()
+    if body.get("jenkins_token"):
+        JENKINS_TOKEN = body["jenkins_token"]
+    if body.get("sonar_url"):
+        SONAR_URL = body["sonar_url"].strip()
+    if body.get("sonar_token"):
+        SONAR_TOKEN = body["sonar_token"]
+
     return {
-        "status":      "ok",
-        "provider":    LLM_PROVIDER,
-        "ollama_url":  OLLAMA_URL,
-        "model":       _active_model(),
-        "groq_key_set": bool(GROQ_API_KEY),
+        "status":          "ok",
+        "provider":        LLM_PROVIDER,
+        "ollama_url":      OLLAMA_URL,
+        "model":           _active_model(),
+        "groq_key_set":    bool(GROQ_API_KEY),
+        "jenkins_url":     JENKINS_URL,
+        "jenkins_key_set": bool(JENKINS_TOKEN),
+        "sonar_url":       SONAR_URL,
+        "sonar_key_set":   bool(SONAR_TOKEN),
     }
 
 
