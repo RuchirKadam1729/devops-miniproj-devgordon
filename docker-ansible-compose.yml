@@ -1,0 +1,96 @@
+version: '3.9'
+
+services:
+  ansible-runner:
+    image: python:3.11-slim
+    volumes:
+      - .:/workspace
+      - /var/run/docker.sock:/var/run/docker.sock
+    working_dir: /workspace
+    command: >
+      bash -c
+      "set -e &&
+      echo '[*] Installing Ansible...' &&
+      pip install ansible ansible-lint httpx pydantic python-dotenv pyyaml -q &&
+      echo '[*] Creating inventory...' &&
+      mkdir -p ansible &&
+      echo '[local]' > ansible/inventory.ini &&
+      echo 'localhost ansible_connection=local' >> ansible/inventory.ini &&
+      echo '[*] Running playbook...' &&
+      ansible-playbook test-devgordon-groq.yml -i ansible/inventory.ini -v &&
+      echo '[✓] Test run complete!' &&
+      tail -100 test_results/test_run_groq_*.txt 2>/dev/null || echo 'Results file not found'"
+    networks:
+      - devgordon-net
+    depends_on:
+      app:
+        condition: service_healthy
+      jenkins:
+        condition: service_started
+      sonarqube:
+        condition: service_started
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - '8000:8000'
+    env_file:
+      - .env
+    environment:
+      - LLM_PROVIDER=groq
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=llama-3.3-70b-versatile
+      - SONAR_URL=http://sonarqube:9000
+      - CONVERSATIONS_DIR=/app/app/conversations
+      - SECRETS_DIR=/app/secrets
+      - WORKSPACE=/workspace
+    volumes:
+      - ./:/workspace:rw
+      - ./conversations:/app/app/conversations:rw
+      - ./secrets:/app/secrets:rw
+    networks:
+      - devgordon-net
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000/health']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  jenkins:
+    image: jenkins/jenkins:lts-jdk17
+    ports:
+      - '8080:8080'
+      - '50000:50000'
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - JENKINS_OPTS=--httpPort=8080
+    networks:
+      - devgordon-net
+    restart: unless-stopped
+
+  sonarqube:
+    image: sonarqube:10-community
+    ports:
+      - '9000:9000'
+    environment:
+      - SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+    networks:
+      - devgordon-net
+    restart: unless-stopped
+
+volumes:
+  jenkins_home:
+  sonarqube_data:
+  sonarqube_logs:
+
+networks:
+  devgordon-net:
+    driver: bridge

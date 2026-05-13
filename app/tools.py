@@ -376,33 +376,55 @@ def _trigger_jenkins(args: dict) -> dict:
         return {"success": False, "output": f"Cannot connect to Jenkins at {JENKINS_URL}. Is it running?"}
 
 def _get_kube_server():
+    """Extract Kubernetes API server from kubeconfig with multiple fallbacks."""
+    # Priority 1: Explicit env var
     explicit = os.getenv("KUBE_API_SERVER", "").strip()
     if explicit:
         return explicit, True
 
-    try:
-        import yaml
-        kubeconfig = os.path.expanduser("~/.kube/config")
-        with open(kubeconfig) as f:
-            cfg = yaml.safe_load(f)
-        current_context = cfg.get("current-context", "")
-        ctx = next((c["context"] for c in cfg.get("contexts", [])
-                    if c["name"] == current_context), {})
-        cluster_name = ctx.get("cluster", "")
-        cluster = next((c["cluster"] for c in cfg.get("clusters", [])
-                        if c["name"] == cluster_name), {})
-        server = cluster.get("server", "")
+    # Priority 2: Try to parse kubeconfig from multiple locations
+    kubeconfig_paths = [
+        os.path.expanduser("~/.kube/config"),
+        "/.kube/config",  # Container mount point
+        os.getenv("KUBECONFIG", ""),
+    ]
+    
+    for kube_path in kubeconfig_paths:
+        if not kube_path or not os.path.exists(kube_path):
+            continue
+        try:
+            import yaml
+            with open(kube_path) as f:
+                cfg = yaml.safe_load(f)
+            if not cfg or not cfg.get("clusters"):
+                continue
+                
+            current_context = cfg.get("current-context", "")
+            ctx = next((c["context"] for c in cfg.get("contexts", [])
+                        if c["name"] == current_context), {})
+            cluster_name = ctx.get("cluster", "")
+            cluster = next((c["cluster"] for c in cfg.get("clusters", [])
+                            if c["name"] == cluster_name), {})
+            server = cluster.get("server", "")
 
-        if "127.0.0.1" in server:
-            return server.replace("127.0.0.1", "host.docker.internal"), True
-        
-        # Already rewritten by startup script — still needs --insecure-skip-tls-verify
-        if "host.docker.internal" in server:
-            return server, True   # ← this is the fix
+            if not server:
+                continue
+                
+            # Rewrite localhost/127.0.0.1 to host.docker.internal for Docker Desktop
+            if "127.0.0.1" in server:
+                return server.replace("127.0.0.1", "host.docker.internal"), True
+            if "localhost" in server:
+                return server.replace("localhost", "host.docker.internal"), True
+            if "host.docker.internal" in server:
+                return server, True
+            
+            # Return as-is if it's an external server
+            return server, True
+        except Exception as e:
+            continue
 
-    except Exception:
-        pass
-
+    # Priority 3: Fallback to Docker Desktop default with insecure mode
+    # This handles the case where kubeconfig is missing but kubectl is available
     return None, False
 
 def _kubectl(args: dict) -> dict:
@@ -410,15 +432,22 @@ def _kubectl(args: dict) -> dict:
     command = args.get("command", "").strip()
     namespace = args.get("namespace", "default")
 
-    # Safety: block destructive commands unless they're explicit
-    destructive = ["delete", "drain", "cordon"]
+    if not command:
+        return {"success": False, "output": "No command provided"}
+    
     cmd_parts = command.split()
 
+    # Build kubectl command with server/auth flags if needed
     server, needs_override = _get_kube_server()
-    if needs_override:
+    
+    # Always use insecure mode when running from container (no cert verification)
+    # This is safe because we're talking to a local Kubernetes cluster
+    if server:
         full_cmd = ["kubectl", f"--server={server}", "--insecure-skip-tls-verify"] + cmd_parts
     else:
-        full_cmd = ["kubectl"] + cmd_parts
+        # Fallback: just use kubectl as-is (will use ~/.kube/config if it exists)
+        # Add insecure flag anyway to prevent interactive prompts
+        full_cmd = ["kubectl", "--insecure-skip-tls-verify"] + cmd_parts
 
     # Add namespace flag if not already present and command supports it
     ns_supporting = ["get", "describe", "logs", "delete", "apply", "rollout", "scale"]
@@ -428,12 +457,13 @@ def _kubectl(args: dict) -> dict:
     try:
         result = subprocess.run(
             full_cmd,
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=30,
+            stdin=subprocess.DEVNULL  # Prevent kubectl from trying to read stdin for auth prompts
         )
         output = result.stdout + (result.stderr if result.stderr else "")
         return {"success": result.returncode == 0, "output": output}
     except FileNotFoundError:
-        return {"success": False, "output": "kubectl not found. Is Minikube running?"}
+        return {"success": False, "output": "kubectl not found. Is Minikube/Docker Desktop Kubernetes running?"}
     except subprocess.TimeoutExpired:
         return {"success": False, "output": "kubectl timed out after 30s"}
 

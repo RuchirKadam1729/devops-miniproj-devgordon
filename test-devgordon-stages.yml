@@ -1,0 +1,488 @@
+---
+# test-devgordon-stages.yml
+# Comprehensive staged test run for DevGordon
+# Validates all major components and outputs timestamped results for documentation
+#
+# Run with:
+#   ansible-playbook test-devgordon-stages.yml -i ansible/inventory.ini -v
+#
+# This playbook stages the entire test run, collecting evidence (logs, outputs, screenshots)
+# suitable for inclusion in project documentation or submission.
+
+- name: DevGordon Comprehensive Staged Test Run
+  hosts: localhost
+  connection: local
+  gather_facts: true
+
+  vars:
+    devgordon_url: "http://localhost:8000"
+    jenkins_url: "http://localhost:8080"
+    sonarqube_url: "http://localhost:9000"
+    ollama_url: "http://localhost:11434"
+    test_output_dir: "./test_results"
+    timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    results_file: "{{ test_output_dir }}/test_run_{{ timestamp }}.txt"
+
+  pre_tasks:
+    - name: Create test output directory
+      file:
+        path: "{{ test_output_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Initialize test results file
+      copy:
+        content: |
+          ========================================
+          DevGordon Comprehensive Test Run
+          ========================================
+          Started: {{ ansible_date_time.iso8601 }}
+          Hostname: {{ ansible_hostname }}
+          OS: {{ ansible_os_family }}
+          
+        dest: "{{ results_file }}"
+        mode: '0644'
+
+  tasks:
+    # ========================================
+    # STAGE 1: Environment Validation
+    # ========================================
+    - name: "STAGE 1: Environment Validation"
+      debug:
+        msg: "Starting environment validation..."
+
+    - name: Check Docker is installed
+      shell: docker --version
+      register: docker_version
+      failed_when: docker_version.rc != 0
+
+    - name: Check Docker Compose is available
+      shell: docker compose version
+      register: compose_version
+      failed_when: compose_version.rc != 0
+
+    - name: Check kubectl is available
+      shell: kubectl version --client --short
+      register: kubectl_version
+      ignore_errors: true
+
+    - name: Check Ollama is available
+      shell: ollama --version
+      register: ollama_version
+      ignore_errors: true
+
+    - name: Append environment check results to log
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "STAGE 1: Environment Validation"
+        - "{{ docker_version.stdout }}"
+        - "{{ compose_version.stdout }}"
+        - "kubectl: {{ kubectl_version.stdout | default('NOT AVAILABLE') }}"
+        - "Ollama: {{ ollama_version.stdout | default('NOT AVAILABLE') }}"
+
+    # ========================================
+    # STAGE 2: Service Health Checks
+    # ========================================
+    - name: "STAGE 2: Service Health Checks"
+      debug:
+        msg: "Checking all docker-compose services..."
+
+    - name: Check if docker-compose is running
+      shell: cd . && docker compose ps --format json
+      register: compose_ps
+      ignore_errors: true
+
+    - name: Parse running containers
+      set_fact:
+        running_containers: "{{ compose_ps.stdout | from_json | map(attribute='Service') | list }}"
+      when: compose_ps.rc == 0
+
+    - name: Start docker-compose if not running
+      shell: cd . && docker compose up -d
+      when: compose_ps.rc != 0 or running_containers | length == 0
+      register: compose_start
+
+    - name: Wait for services to stabilize
+      wait_for:
+        timeout: 5
+      when: compose_start.changed
+
+    - name: Check DevGordon app container status
+      shell: cd . && docker compose ps app --format json | head -1 | jq '.State'
+      register: app_state
+      ignore_errors: true
+
+    - name: Append service health to log
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "STAGE 2: Service Health Checks"
+        - "Running containers: {{ running_containers | default('Unknown') | join(', ') }}"
+        - "App container state: {{ app_state.stdout | default('Unknown') }}"
+
+    # ========================================
+    # STAGE 3: Ollama Model Verification
+    # ========================================
+    - name: "STAGE 3: Ollama Model Verification"
+      debug:
+        msg: "Verifying Ollama model is loaded..."
+
+    - name: List available Ollama models
+      shell: ollama list
+      register: ollama_list
+      ignore_errors: true
+
+    - name: Pull qwen3:8b model (if not present)
+      shell: ollama pull qwen3:8b
+      register: ollama_pull
+      timeout: 600
+      ignore_errors: true
+      when: "'qwen3:8b' not in (ollama_list.stdout | default(''))"
+
+    - name: Verify model is loaded
+      shell: ollama list | grep -i qwen
+      register: model_check
+      ignore_errors: true
+
+    - name: Append Ollama info to log
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "STAGE 3: Ollama Model Verification"
+        - "Models available:"
+        - "{{ ollama_list.stdout | default('Could not retrieve') }}"
+        - "qwen3:8b status: {{ 'LOADED' if 'qwen3:8b' in model_check.stdout else 'NOT FOUND' }}"
+
+    # ========================================
+    # STAGE 4: Kubernetes Cluster Check
+    # ========================================
+    - name: "STAGE 4: Kubernetes Cluster Check"
+      debug:
+        msg: "Verifying Kubernetes cluster is accessible..."
+
+    - name: Get Kubernetes cluster info
+      shell: kubectl cluster-info
+      register: k8s_cluster
+      ignore_errors: true
+
+    - name: Get Kubernetes nodes
+      shell: kubectl get nodes -o wide
+      register: k8s_nodes
+      ignore_errors: true
+
+    - name: Get all namespaces
+      shell: kubectl get namespaces
+      register: k8s_namespaces
+      ignore_errors: true
+
+    - name: Append Kubernetes info to log
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "STAGE 4: Kubernetes Cluster Check"
+        - "Cluster info:"
+        - "{{ k8s_cluster.stdout | default('Cluster NOT accessible') }}"
+        - ""
+        - "Nodes:"
+        - "{{ k8s_nodes.stdout | default('No nodes found') }}"
+        - ""
+        - "Namespaces:"
+        - "{{ k8s_namespaces.stdout | default('No namespaces found') }}"
+
+    # ========================================
+    # STAGE 5: DevGordon API Health
+    # ========================================
+    - name: "STAGE 5: DevGordon API Health"
+      debug:
+        msg: "Testing DevGordon API endpoints..."
+
+    - name: Check /health endpoint
+      uri:
+        url: "{{ devgordon_url }}/health"
+        method: GET
+        status_code: 200
+        timeout: 10
+      register: health_response
+      ignore_errors: true
+
+    - name: Parse health response
+      set_fact:
+        health_data: "{{ health_response.json | default({}) }}"
+      when: health_response.rc == 0
+
+    - name: Check /mcp/tools endpoint
+      uri:
+        url: "{{ devgordon_url }}/mcp/tools"
+        method: GET
+        status_code: 200
+        timeout: 10
+      register: mcp_tools_response
+      ignore_errors: true
+
+    - name: Parse MCP tools response
+      set_fact:
+        mcp_tools: "{{ mcp_tools_response.json.tools | default([]) | map(attribute='name') | list }}"
+      when: mcp_tools_response.rc == 0
+
+    - name: Check DevGordon UI loads
+      uri:
+        url: "{{ devgordon_url }}/"
+        method: GET
+        status_code: 200
+        timeout: 10
+      register: ui_response
+      ignore_errors: true
+
+    - name: Append API health to log
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "STAGE 5: DevGordon API Health"
+        - "/health endpoint: {{ 'OK' if health_response.rc == 0 else 'FAILED' }}"
+        - "  Status: {{ health_data.status | default('N/A') }}"
+        - "  Ollama: {{ health_data.ollama | default('N/A') }}"
+        - "  Model: {{ health_data.model_selected | default('N/A') }}"
+        - ""
+        - "/mcp/tools endpoint: {{ 'OK' if mcp_tools_response.rc == 0 else 'FAILED' }}"
+        - "  Tools available: {{ mcp_tools | join(', ') | default('N/A') }}"
+        - ""
+        - "UI endpoint: {{ 'OK' if ui_response.rc == 0 else 'FAILED' }}"
+
+    # ========================================
+    # STAGE 6: Run Integration Tests
+    # ========================================
+    - name: "STAGE 6: Run Integration Tests"
+      debug:
+        msg: "Running pytest integration suite..."
+
+    - name: Run pytest (non-slow tests only)
+      shell: cd . && pytest tests/test_devgordon.py -v -m 'not slow' --tb=short -x
+      register: pytest_output
+      ignore_errors: true
+
+    - name: Append pytest results to log
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "STAGE 6: Integration Tests"
+        - "pytest exit code: {{ pytest_output.rc }}"
+        - "pytest stdout:"
+        - "{{ pytest_output.stdout | default('No output') }}"
+
+    # ========================================
+    # STAGE 7: Security Scan Validation
+    # ========================================
+    - name: "STAGE 7: Security Scan Validation"
+      debug:
+        msg: "Testing pre-execution security scans..."
+
+    - name: Test scan endpoint - safe kubectl get
+      uri:
+        url: "{{ devgordon_url }}/scan-code"
+        method: POST
+        body_format: json
+        body:
+          tool_name: "kubectl_command"
+          tool_args:
+            command: "get pods"
+        status_code: 200
+      register: scan_safe
+      ignore_errors: true
+
+    - name: Test scan endpoint - dangerous mode 0777
+      uri:
+        url: "{{ devgordon_url }}/scan-code"
+        method: POST
+        body_format: json
+        body:
+          tool_name: "run_ansible_playbook"
+          tool_args:
+            playbook_content: "---\n- hosts: localhost\n  tasks:\n    - file:\n        path: /tmp/test\n        mode: '0777'\n"
+        status_code: 200
+      register: scan_dangerous
+      ignore_errors: true
+
+    - name: Append scan results to log
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "STAGE 7: Security Scan Validation"
+        - "Safe scan (kubectl get): {{ scan_safe.json.scan_status | default('FAILED') }}"
+        - "Dangerous scan (mode 0777): {{ scan_dangerous.json.scan_status | default('FAILED') }}"
+        - "Dangerous scan flagged as warning/error: {{ scan_dangerous.json.scan_status in ['warning', 'error', 'critical'] | default(false) }}"
+
+    # ========================================
+    # STAGE 8: Chat Endpoint (Simple)
+    # ========================================
+    - name: "STAGE 8: Chat Endpoint Basic Test"
+      debug:
+        msg: "Testing chat endpoint with simple message..."
+
+    - name: Send plain chat message
+      uri:
+        url: "{{ devgordon_url }}/chat"
+        method: POST
+        body_format: json
+        body:
+          message: "hello"
+        status_code: 200
+      register: chat_response
+      ignore_errors: true
+      timeout: 30
+
+    - name: Append chat test to log
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "STAGE 8: Chat Endpoint Basic Test"
+        - "Chat /hello status: {{ 'OK' if chat_response.rc == 0 else 'FAILED' }}"
+        - "Response type: {{ chat_response.json.type | default('UNKNOWN') }}"
+
+    # ========================================
+    # STAGE 9: Jenkins Integration Check
+    # ========================================
+    - name: "STAGE 9: Jenkins Integration Check"
+      debug:
+        msg: "Checking Jenkins connectivity..."
+
+    - name: Check Jenkins is reachable
+      uri:
+        url: "{{ jenkins_url }}/api/json"
+        method: GET
+        status_code: 200
+        timeout: 10
+      register: jenkins_response
+      ignore_errors: true
+
+    - name: Append Jenkins info to log
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "STAGE 9: Jenkins Integration Check"
+        - "Jenkins reachable: {{ 'YES' if jenkins_response.rc == 0 else 'NO' }}"
+        - "Jenkins version: {{ jenkins_response.json.version | default('Unknown') }}"
+
+    # ========================================
+    # STAGE 10: SonarQube Integration Check
+    # ========================================
+    - name: "STAGE 10: SonarQube Integration Check"
+      debug:
+        msg: "Checking SonarQube connectivity..."
+
+    - name: Check SonarQube is reachable
+      uri:
+        url: "{{ sonarqube_url }}/api/system/status"
+        method: GET
+        timeout: 10
+      register: sonar_response
+      ignore_errors: true
+
+    - name: Append SonarQube info to log
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "STAGE 10: SonarQube Integration Check"
+        - "SonarQube reachable: {{ 'YES' if sonar_response.rc == 0 else 'NO' }}"
+        - "SonarQube status: {{ sonar_response.json.status | default('Unknown') }}"
+
+    # ========================================
+    # STAGE 11: Collect System Stats
+    # ========================================
+    - name: "STAGE 11: System Stats"
+      debug:
+        msg: "Collecting system resource information..."
+
+    - name: Get Docker system info
+      shell: docker system df
+      register: docker_df
+      ignore_errors: true
+
+    - name: Get docker-compose container stats
+      shell: docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}"
+      register: docker_stats
+      ignore_errors: true
+      timeout: 10
+
+    - name: Get disk usage
+      shell: df -h / | tail -1
+      register: disk_usage
+      ignore_errors: true
+
+    - name: Append system stats to log
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "STAGE 11: System Stats"
+        - "Docker disk usage:"
+        - "{{ docker_df.stdout | default('N/A') }}"
+        - ""
+        - "Container stats:"
+        - "{{ docker_stats.stdout | default('N/A') }}"
+        - ""
+        - "Root filesystem:"
+        - "{{ disk_usage.stdout | default('N/A') }}"
+
+  post_tasks:
+    - name: Finalize test results
+      lineinfile:
+        path: "{{ results_file }}"
+        line: "{{ item }}"
+        insertafter: EOF
+      loop:
+        - ""
+        - "========================================="
+        - "Test Run Completed: {{ ansible_date_time.iso8601 }}"
+        - "Results saved to: {{ results_file }}"
+        - "=========================================="
+
+    - name: Display test results file location
+      debug:
+        msg: |
+          ✓ Test run complete!
+          Results saved to: {{ results_file }}
+          
+          To view results:
+            cat {{ results_file }}
+
+    - name: Read and display results
+      slurp:
+        src: "{{ results_file }}"
+      register: results_content
+
+    - name: Output final results
+      debug:
+        msg: "{{ results_content['content'] | b64decode }}"

@@ -32,7 +32,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # ---- LLM Provider Configuration ----
-LLM_PROVIDER    = os.getenv("LLM_PROVIDER", "ollama").lower()
+LLM_PROVIDER    = os.getenv("LLM_PROVIDER", "groq").lower()  # Default to Groq for fast testing
 OLLAMA_URL      = os.getenv("OLLAMA_URL")
 OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen3:8b")
 GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")

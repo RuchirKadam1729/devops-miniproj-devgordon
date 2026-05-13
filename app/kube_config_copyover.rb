@@ -4,7 +4,18 @@ require 'yaml'
 home = ENV["HOME"]
 FileUtils.mkdir_p("#{home}/.kube")
 
+# Guard: only proceed if kubeconfig exists and has content
+if !File.exist?("/.kube/config") || File.size("/.kube/config") == 0
+  puts "[INFO] No kubeconfig found or empty. Skipping kubeconfig rewrite."
+  exit 0
+end
+
 config = YAML.load_file("/.kube/config")
+
+if config.nil? || config["clusters"].nil?
+  puts "[INFO] Invalid or empty kubeconfig. Skipping rewrite."
+  exit 0
+end
 
 config["clusters"].each do |cluster|
   server = cluster["cluster"]["server"]
