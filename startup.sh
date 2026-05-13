@@ -11,8 +11,8 @@ echo "║                  Ansible runs in Docker — no external dependencies  
 echo "╚════════════════════════════════════════════════════════════════════════════════╝"
 echo ""
 
-# Load Groq API key
-export GROQ_API_KEY=$(cat ./secrets/GROQ_API_KEY)
+# Load Groq API key (strip whitespace)
+export GROQ_API_KEY=$(tr -d '[:space:]' < ./secrets/GROQ_API_KEY)
 echo "✓ Groq API key loaded"
 
 # Cleanup
@@ -24,7 +24,7 @@ sleep 2
 
 # Start stack
 echo "[Step 2/4] Starting DevGordon stack (app, Jenkins, SonarQube)..."
-docker compose -f docker-ansible-compose.yml up -d app jenkins sonarqube
+GROQ_API_KEY=$(tr -d '[:space:]' < ./secrets/GROQ_API_KEY) docker compose -f docker-ansible-compose.yml up -d app jenkins sonarqube
 sleep 5
 
 # Wait for health
@@ -42,8 +42,8 @@ done
 echo "[Step 4/4] Running comprehensive test suite (9 stages)..."
 echo ""
 
-export GROQ_API_KEY=$(cat ./secrets/GROQ_API_KEY)
-docker compose -f docker-ansible-compose.yml run --rm ansible-runner
+export GROQ_API_KEY=$(tr -d '[:space:]' < ./secrets/GROQ_API_KEY)
+GROQ_API_KEY=$(tr -d '[:space:]' < ./secrets/GROQ_API_KEY) docker compose -f docker-ansible-compose.yml run --rm ansible-runner
 
 echo ""
 echo "════════════════════════════════════════════════════════════════════════════════"

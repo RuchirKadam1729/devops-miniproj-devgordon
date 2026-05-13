@@ -46,10 +46,12 @@ services:
       - CONVERSATIONS_DIR=/app/app/conversations
       - SECRETS_DIR=/app/secrets
       - WORKSPACE=/workspace
+      - KUBECONFIG=/etc/kube/config
     volumes:
       - ./:/workspace:rw
       - ./conversations:/app/app/conversations:rw
       - ./secrets:/app/secrets:rw
+      - ~/.kube:/etc/kube:ro
     networks:
       - devgordon-net
     restart: unless-stopped

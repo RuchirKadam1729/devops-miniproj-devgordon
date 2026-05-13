@@ -428,7 +428,9 @@ def _get_kube_server():
     return None, False
 
 def _kubectl(args: dict) -> dict:
-    """Run a kubectl command. Namespace is injected if not already in the command."""
+    """Run kubectl with explicit kubeconfig and server override for Docker Desktop."""
+    import yaml
+    
     command = args.get("command", "").strip()
     namespace = args.get("namespace", "default")
 
@@ -436,20 +438,37 @@ def _kubectl(args: dict) -> dict:
         return {"success": False, "output": "No command provided"}
     
     cmd_parts = command.split()
-
-    # Build kubectl command with server/auth flags if needed
-    server, needs_override = _get_kube_server()
+    kubeconfig_path = os.getenv("KUBECONFIG", os.path.expanduser("~/.kube/config"))
+    port = "57106"  # Fallback Docker Desktop API port
     
-    # Always use insecure mode when running from container (no cert verification)
-    # This is safe because we're talking to a local Kubernetes cluster
-    if server:
-        full_cmd = ["kubectl", f"--server={server}", "--insecure-skip-tls-verify"] + cmd_parts
-    else:
-        # Fallback: just use kubectl as-is (will use ~/.kube/config if it exists)
-        # Add insecure flag anyway to prevent interactive prompts
-        full_cmd = ["kubectl", "--insecure-skip-tls-verify"] + cmd_parts
-
-    # Add namespace flag if not already present and command supports it
+    # Extract actual port from kubeconfig
+    if os.path.exists(kubeconfig_path):
+        try:
+            with open(kubeconfig_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            current_context = cfg.get("current-context", "")
+            for ctx in cfg.get("contexts", []) or []:
+                if ctx.get("name") == current_context:
+                    cluster_name = ctx.get("context", {}).get("cluster", "")
+                    for cluster in cfg.get("clusters", []) or []:
+                        if cluster.get("name") == cluster_name:
+                            server = cluster.get("cluster", {}).get("server", "")
+                            if server and ":" in server:
+                                port = server.split(":")[-1]
+                            break
+                    break
+        except:
+            pass
+    
+    # Build command with explicit kubeconfig and server override
+    full_cmd = [
+        "kubectl",
+        f"--kubeconfig={kubeconfig_path}",
+        f"--server=https://host.docker.internal:{port}",
+        "--insecure-skip-tls-verify"
+    ] + cmd_parts
+    
+    # Add namespace if applicable
     ns_supporting = ["get", "describe", "logs", "delete", "apply", "rollout", "scale"]
     if cmd_parts and cmd_parts[0] in ns_supporting and "-n" not in command and "--namespace" not in command:
         full_cmd += ["-n", namespace]
@@ -458,14 +477,17 @@ def _kubectl(args: dict) -> dict:
         result = subprocess.run(
             full_cmd,
             capture_output=True, text=True, timeout=30,
-            stdin=subprocess.DEVNULL  # Prevent kubectl from trying to read stdin for auth prompts
+            stdin=subprocess.DEVNULL
         )
         output = result.stdout + (result.stderr if result.stderr else "")
         return {"success": result.returncode == 0, "output": output}
     except FileNotFoundError:
-        return {"success": False, "output": "kubectl not found. Is Minikube/Docker Desktop Kubernetes running?"}
+        return {"success": False, "output": "kubectl not found"}
     except subprocess.TimeoutExpired:
-        return {"success": False, "output": "kubectl timed out after 30s"}
+        return {"success": False, "output": "kubectl timed out"}
+    except Exception as e:
+        return {"success": False, "output": f"error: {str(e)}"}
+
 
 
 def _docker(args: dict) -> dict:

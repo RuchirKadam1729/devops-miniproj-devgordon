@@ -367,18 +367,19 @@ async def _call_ollama(messages: list[dict]) -> dict:
 def _serialise_tool_calls_for_groq(tool_calls: list) -> list:
     """
     Groq requires tool_calls[].function.arguments to be a JSON *string*,
-    not a parsed dict.  Our normalisation layer stores them as dicts for
+    not a parsed dict. Our normalisation layer stores them as dicts for
     convenience, so we re-serialise here before sending history back to Groq.
     """
     out = []
     for tc in tool_calls:
         raw = tc.get("function", {}).get("arguments", {})
+        arguments_str = json.dumps(raw) if isinstance(raw, dict) else (raw or "{}")
         out.append({
-            "id":   tc.get("id", ""),
+            "id":   tc.get("id", f"call_{str(uuid.uuid4())[:8]}"),
             "type": "function",
             "function": {
                 "name":      tc["function"]["name"],
-                "arguments": json.dumps(raw) if isinstance(raw, dict) else (raw or "{}"),
+                "arguments": arguments_str,
             },
         })
     return out
@@ -406,17 +407,22 @@ async def _call_groq(messages: list[dict]) -> dict:
         messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
 
     # ---- Sanitise history for Groq ----
-    # • role:"tool" → role:"user"   (Groq needs tool_call_id pairing we don't track)
-    # • assistant tool_calls: re-serialise arguments as JSON strings  ← KEY FIX
+    # • role:"tool" → wrap as user message with tool result context
+    # • assistant tool_calls: only include on first call, strip from history replay
     sanitised: list[dict] = []
-    for m in messages:
+    for i, m in enumerate(messages):
         if m.get("role") == "tool":
-            sanitised.append({"role": "user", "content": f"[tool result] {m.get('content', '')}"})
-        else:
-            entry: dict = {"role": m["role"], "content": m.get("content") or ""}
-            if m.get("tool_calls") and m["role"] == "assistant":
+            sanitised.append({"role": "user", "content": f"[tool result]\n{m.get('content', '')}"})
+        elif m.get("role") == "assistant":
+            # Only include tool_calls on the current turn, not in history playback
+            # to avoid Groq trying to re-interpret old tool calls
+            entry: dict = {"role": "assistant", "content": m.get("content") or ""}
+            if m.get("tool_calls") and i == len(messages) - 1:
+                # Last message — this is the current assistant response
                 entry["tool_calls"] = _serialise_tool_calls_for_groq(m["tool_calls"])
             sanitised.append(entry)
+        else:
+            sanitised.append({"role": m["role"], "content": m.get("content") or ""})
 
     payload = {
         "model": GROQ_MODEL,
