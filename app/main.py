@@ -2,8 +2,8 @@
 main.py — DevGordon FastAPI backend
 =====================================
 Architecture:
-  - Ollama (local, tool-capable) OR Groq (remote, fast) handles reasoning + tool selection
-  - qwen3:8b / llama3.1:8b (Ollama) or llama-3.3-70b-versatile (Groq) — full function calling
+  - Any OpenAI-compatible LLM endpoint (Groq, Ollama /v1, OpenAI, OpenRouter, Together…)
+  - Single unified config: LLM_BASE_URL + LLM_API_KEY + LLM_MODEL
   - All infrastructure execution (kubectl, ansible, jenkins, docker) runs locally
   - Pre-scan via scanner.py before every approval card
   - Full agentic loop: user → LLM → tool_call → scan → approve → execute → interpret
@@ -23,45 +23,72 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-# Load environment variables from .env file (if present)
 load_dotenv()
 
-app = FastAPI(title="DevGordon", version="3.0.0")
+app = FastAPI(title="DevGordon", version="4.0.0")
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# ---- LLM Provider Configuration ----
-LLM_PROVIDER    = os.getenv("LLM_PROVIDER", "groq").lower()  # Default to Groq for fast testing
-OLLAMA_URL      = os.getenv("OLLAMA_URL")
-OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "qwen3:8b")
-GROQ_API_KEY    = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL      = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-GROQ_API_BASE   = "https://api.groq.com/openai/v1"
+# ============================================================================
+# LLM CONFIG — single source of truth, OpenAI-compatible
+# ============================================================================
+# Examples:
+#   Groq:       LLM_BASE_URL=https://api.groq.com/openai/v1
+#   Ollama:     LLM_BASE_URL=http://localhost:11434/v1
+#   OpenAI:     LLM_BASE_URL=https://api.openai.com/v1
+#   OpenRouter: LLM_BASE_URL=https://openrouter.ai/api/v1
+#   Together:   LLM_BASE_URL=https://api.together.xyz/v1
 
-def _active_model() -> str:
-    return GROQ_MODEL if LLM_PROVIDER == "groq" else OLLAMA_MODEL
+LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
+LLM_API_KEY: str = os.getenv(
+    "LLM_API_KEY",
+    os.getenv("GROQ_API_KEY", ""),  # backward-compat shim
+)
+LLM_MODEL: str = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
 
 # ---- Infrastructure URLs ----
-JENKINS_URL   = os.getenv("JENKINS_URL", "")
-JENKINS_TOKEN = os.getenv("JENKINS_TOKEN", "")
-SONAR_URL     = os.getenv("SONAR_URL", "")
-SONAR_TOKEN   = os.getenv("SONAR_TOKEN", "")
+JENKINS_URL: str = os.getenv("JENKINS_URL", "")
+JENKINS_TOKEN: str = os.getenv("JENKINS_TOKEN", "")
+SONAR_URL: str = os.getenv("SONAR_URL", "")
+SONAR_TOKEN: str = os.getenv("SONAR_TOKEN", "")
 
 # ---- Approval mode ----
 _approval_mode: str = "always"
 
 READ_ONLY_TOOLS = {"kubectl_command", "jenkins_status", "docker_operation"}
 
-WRITE_PREFIXES = {
+WRITE_PREFIXES: dict[str, tuple] = {
     "kubectl_command": (
-        "apply", "delete", "create", "patch", "scale", "rollout",
-        "exec", "cp", "port-forward", "drain", "cordon", "taint",
-        "label", "annotate",
+        "apply",
+        "delete",
+        "create",
+        "patch",
+        "scale",
+        "rollout",
+        "exec",
+        "cp",
+        "port-forward",
+        "drain",
+        "cordon",
+        "taint",
+        "label",
+        "annotate",
     ),
     "docker_operation": (
-        "run", "stop", "rm", "rmi", "pull", "push", "build",
-        "exec", "kill", "start", "restart", "rename", "update",
+        "run",
+        "stop",
+        "rm",
+        "rmi",
+        "pull",
+        "push",
+        "build",
+        "exec",
+        "kill",
+        "start",
+        "restart",
+        "rename",
+        "update",
     ),
 }
 
@@ -82,8 +109,7 @@ def _is_read_only(tool_name: str, tool_args: dict) -> bool:
 # SECRETS — persisted API keys that survive container resets
 # ============================================================================
 
-# Mount ./secrets:/app/secrets in docker-compose.yml
-SECRETS_DIR  = Path(os.getenv("SECRETS_DIR", "/app/secrets"))
+SECRETS_DIR = Path(os.getenv("SECRETS_DIR", "/app/secrets"))
 SECRETS_FILE = SECRETS_DIR / "keys.json"
 
 
@@ -102,15 +128,13 @@ def _write_secrets_file(data: dict) -> None:
 
 
 def _load_secrets_on_startup() -> None:
-    """
-    Apply any persisted keys to the in-memory globals.
-    Called once at import time so Groq / Jenkins / Sonar work without
-    the user having to re-enter keys after a container restart.
-    """
-    global GROQ_API_KEY, JENKINS_TOKEN, SONAR_TOKEN
+    global LLM_API_KEY, JENKINS_TOKEN, SONAR_TOKEN
     s = _read_secrets_file()
-    if s.get("groq_api_key"):
-        GROQ_API_KEY = s["groq_api_key"]
+    # Support both new key name and legacy groq_api_key
+    if s.get("llm_api_key"):
+        LLM_API_KEY = s["llm_api_key"]
+    elif s.get("groq_api_key"):
+        LLM_API_KEY = s["groq_api_key"]
     if s.get("jenkins_token"):
         JENKINS_TOKEN = s["jenkins_token"]
     if s.get("sonar_token"):
@@ -122,35 +146,25 @@ _load_secrets_on_startup()
 
 @app.get("/secrets")
 async def get_secrets():
-    """Return which keys are saved (boolean only — never expose values)."""
     s = _read_secrets_file()
     return {
-        "groq_api_key":  bool(s.get("groq_api_key")),
+        "llm_api_key": bool(s.get("llm_api_key") or s.get("groq_api_key")),
         "jenkins_token": bool(s.get("jenkins_token")),
-        "sonar_token":   bool(s.get("sonar_token")),
+        "sonar_token": bool(s.get("sonar_token")),
     }
 
 
 @app.post("/secrets")
 async def save_secrets(body: dict):
-    """
-    Persist one or more keys to secrets/keys.json.
-    Only non-empty values are written; omitted keys keep their existing value.
-    Also updates the in-memory globals immediately so the running server
-    picks them up without a restart.
-    """
-    global GROQ_API_KEY, JENKINS_TOKEN, SONAR_TOKEN
-
+    global LLM_API_KEY, JENKINS_TOKEN, SONAR_TOKEN
     existing = _read_secrets_file()
     saved: list[str] = []
 
-    mapping = {
-        "groq_api_key":  "groq_api_key",
+    for field, store_key in {
+        "llm_api_key": "llm_api_key",
         "jenkins_token": "jenkins_token",
-        "sonar_token":   "sonar_token",
-    }
-
-    for field, store_key in mapping.items():
+        "sonar_token": "sonar_token",
+    }.items():
         val = body.get(field, "").strip()
         if val:
             existing[store_key] = val
@@ -158,9 +172,8 @@ async def save_secrets(body: dict):
 
     _write_secrets_file(existing)
 
-    # Propagate into memory immediately
-    if existing.get("groq_api_key"):
-        GROQ_API_KEY = existing["groq_api_key"]
+    if existing.get("llm_api_key"):
+        LLM_API_KEY = existing["llm_api_key"]
     if existing.get("jenkins_token"):
         JENKINS_TOKEN = existing["jenkins_token"]
     if existing.get("sonar_token"):
@@ -171,8 +184,7 @@ async def save_secrets(body: dict):
 
 @app.delete("/secrets/{key}")
 async def delete_secret(key: str):
-    """Remove a single key from the secrets file."""
-    allowed = {"groq_api_key", "jenkins_token", "sonar_token"}
+    allowed = {"llm_api_key", "jenkins_token", "sonar_token"}
     if key not in allowed:
         raise HTTPException(400, f"Unknown key '{key}'")
     existing = _read_secrets_file()
@@ -185,8 +197,6 @@ async def delete_secret(key: str):
 # CONVERSATION PERSISTENCE
 # ============================================================================
 
-# Allow overriding via env var so the docker-compose volume mount can point
-# anywhere (fixes the /app/conversations vs /app/app/conversations mismatch).
 CONVERSATIONS_DIR = Path(
     os.getenv("CONVERSATIONS_DIR", str(Path(__file__).parent / "conversations"))
 )
@@ -200,7 +210,9 @@ def _conversation_path(conv_id: str) -> Path:
     return CONVERSATIONS_DIR / f"{conv_id}.json"
 
 
-def _save_conversation(conv_id: str, messages: list[dict], title: str | None = None) -> dict:
+def _save_conversation(
+    conv_id: str, messages: list[dict], title: str | None = None
+) -> dict:
     existing_path = _conversation_path(conv_id)
     if not title:
         for m in messages:
@@ -211,27 +223,25 @@ def _save_conversation(conv_id: str, messages: list[dict], title: str | None = N
         title = title or "Untitled conversation"
 
     now = datetime.now(timezone.utc).isoformat()
-
+    created_at = now
     if existing_path.exists():
         try:
             existing = json.loads(existing_path.read_text())
             created_at = existing.get("created_at", now)
-            if not title:
-                title = existing.get("title", title)
+            title = title or existing.get("title", title)
         except Exception:
-            created_at = now
-    else:
-        created_at = now
+            pass
 
     metadata = {
         "id": conv_id,
         "title": title,
         "created_at": created_at,
         "updated_at": now,
-        "message_count": len([m for m in messages if m.get("role") in ("user", "assistant")]),
+        "message_count": len(
+            [m for m in messages if m.get("role") in ("user", "assistant")]
+        ),
         "messages": messages,
     }
-
     existing_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False))
     return {k: v for k, v in metadata.items() if k != "messages"}
 
@@ -241,13 +251,15 @@ def _list_conversations() -> list[dict]:
     for p in CONVERSATIONS_DIR.glob("*.json"):
         try:
             data = json.loads(p.read_text())
-            result.append({
-                "id": data["id"],
-                "title": data.get("title", "Untitled"),
-                "created_at": data.get("created_at", ""),
-                "updated_at": data.get("updated_at", ""),
-                "message_count": data.get("message_count", 0),
-            })
+            result.append(
+                {
+                    "id": data["id"],
+                    "title": data.get("title", "Untitled"),
+                    "created_at": data.get("created_at", ""),
+                    "updated_at": data.get("updated_at", ""),
+                    "message_count": data.get("message_count", 0),
+                }
+            )
         except Exception:
             pass
     result.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
@@ -281,6 +293,7 @@ def _ensure_active_session():
 # ============================================================================
 # PYDANTIC MODELS
 # ============================================================================
+
 
 class ChatMessage(BaseModel):
     message: str
@@ -319,77 +332,71 @@ UNLESS the specific approval mode has been toggled."""
 
 
 # ============================================================================
-# LLM CALL — Ollama or Groq
+# LLM — single OpenAI-compatible client
 # ============================================================================
 
-async def _call_ollama(messages: list[dict]) -> dict:
-    from tools import TOOL_DEFINITIONS
 
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": t["function"]["name"],
-                "description": t["function"]["description"],
-                "parameters": t["function"].get("parameters", {"type": "object", "properties": {}}),
-            },
+def _build_headers() -> dict:
+    """Auth header. Ollama works with no key; other providers need Bearer."""
+    if LLM_API_KEY:
+        return {
+            "Authorization": f"Bearer {LLM_API_KEY}",
+            "Content-Type": "application/json",
         }
-        for t in TOOL_DEFINITIONS
-    ]
-
-    if not messages or messages[0].get("role") != "system":
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
-
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": messages,
-        "tools": tools,
-        "stream": False,
-        "think": False,   # top-level param (not inside "options"); set True if tool calls stop working
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(f"{OLLAMA_URL}/api/chat", json=payload)
-            if resp.status_code != 200:
-                raise HTTPException(503, f"Ollama error ({resp.status_code}): {resp.text}")
-            return resp.json()
-    except httpx.ConnectError:
-        raise HTTPException(503, f"Cannot connect to Ollama at {OLLAMA_URL}. Is it running?")
-    except httpx.ReadTimeout:
-        raise HTTPException(503, "Ollama timed out — model too slow. Try: ollama pull llama3.1:8b")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(503, f"Ollama request error: {str(e)}")
+    return {"Content-Type": "application/json"}
 
 
-def _serialise_tool_calls_for_groq(tool_calls: list) -> list:
+def _sanitise_messages(messages: list[dict]) -> list[dict]:
     """
-    Groq requires tool_calls[].function.arguments to be a JSON *string*,
-    not a parsed dict. Our normalisation layer stores them as dicts for
-    convenience, so we re-serialise here before sending history back to Groq.
+    Normalise conversation history to strict OpenAI format:
+    - role:tool  → role:user  (tool-result wrapper)
+    - assistant  → strip tool_calls from all but the last assistant turn
+                   (re-sending old tool_calls confuses most providers)
+    - ensure content is always a string, never None
     """
-    out = []
-    for tc in tool_calls:
-        raw = tc.get("function", {}).get("arguments", {})
-        arguments_str = json.dumps(raw) if isinstance(raw, dict) else (raw or "{}")
-        out.append({
-            "id":   tc.get("id", f"call_{str(uuid.uuid4())[:8]}"),
-            "type": "function",
-            "function": {
-                "name":      tc["function"]["name"],
-                "arguments": arguments_str,
-            },
-        })
+    out: list[dict] = []
+    for i, m in enumerate(messages):
+        role = m.get("role", "")
+        content = m.get("content") or ""
+
+        if role == "tool":
+            out.append({"role": "user", "content": f"[tool result]\n{content}"})
+        elif role == "assistant":
+            entry: dict = {"role": "assistant", "content": content}
+            # Only forward tool_calls on the very last assistant message
+            if m.get("tool_calls") and i == len(messages) - 1:
+                tcs = []
+                for tc in m["tool_calls"]:
+                    args = tc.get("function", {}).get("arguments", {})
+                    tcs.append(
+                        {
+                            "id": tc.get("id", f"call_{uuid.uuid4().hex[:8]}"),
+                            "type": "function",
+                            "function": {
+                                "name": tc["function"]["name"],
+                                # OpenAI spec requires arguments as a JSON string
+                                "arguments": json.dumps(args)
+                                if isinstance(args, dict)
+                                else (args or "{}"),
+                            },
+                        }
+                    )
+                entry["tool_calls"] = tcs
+            out.append(entry)
+        else:
+            out.append({"role": role, "content": content})
     return out
 
 
-async def _call_groq(messages: list[dict]) -> dict:
+async def _call_llm(messages: list[dict]) -> dict:
+    """
+    POST to any OpenAI-compatible /chat/completions endpoint.
+    Returns a normalised dict: {"message": {"content": str, "tool_calls": list}}
+    """
     from tools import TOOL_DEFINITIONS
 
-    if not GROQ_API_KEY:
-        raise HTTPException(503, "GROQ_API_KEY is not set. Add it via Settings → Saved Keys.")
+    if not messages or messages[0].get("role") != "system":
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
 
     tools = [
         {
@@ -397,69 +404,45 @@ async def _call_groq(messages: list[dict]) -> dict:
             "function": {
                 "name": t["function"]["name"],
                 "description": t["function"]["description"],
-                "parameters": t["function"].get("parameters", {"type": "object", "properties": {}}),
+                "parameters": t["function"].get(
+                    "parameters", {"type": "object", "properties": {}}
+                ),
             },
         }
         for t in TOOL_DEFINITIONS
     ]
 
-    if not messages or messages[0].get("role") != "system":
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
-
-    # ---- Sanitise history for Groq ----
-    # • role:"tool" → wrap as user message with tool result context
-    # • assistant tool_calls: only include on first call, strip from history replay
-    sanitised: list[dict] = []
-    for i, m in enumerate(messages):
-        if m.get("role") == "tool":
-            sanitised.append({"role": "user", "content": f"[tool result]\n{m.get('content', '')}"})
-        elif m.get("role") == "assistant":
-            # Only include tool_calls on the current turn, not in history playback
-            # to avoid Groq trying to re-interpret old tool calls
-            entry: dict = {"role": "assistant", "content": m.get("content") or ""}
-            if m.get("tool_calls") and i == len(messages) - 1:
-                # Last message — this is the current assistant response
-                entry["tool_calls"] = _serialise_tool_calls_for_groq(m["tool_calls"])
-            sanitised.append(entry)
-        else:
-            sanitised.append({"role": m["role"], "content": m.get("content") or ""})
-
     payload = {
-        "model": GROQ_MODEL,
-        "messages": sanitised,
+        "model": LLM_MODEL,
+        "messages": _sanitise_messages(messages),
         "tools": tools,
         "tool_choice": "auto",
         "max_tokens": 1024,
     }
 
+    url = f"{LLM_BASE_URL.rstrip('/')}/chat/completions"
+
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{GROQ_API_BASE}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {GROQ_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            if resp.status_code != 200:
-                raise HTTPException(503, f"Groq error ({resp.status_code}): {resp.text}")
-            data = resp.json()
-
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(url, headers=_build_headers(), json=payload)
     except httpx.ConnectError:
-        raise HTTPException(503, "Cannot connect to Groq API. Check your internet connection.")
+        raise HTTPException(
+            503, f"Cannot connect to LLM at {LLM_BASE_URL}. Is it running?"
+        )
     except httpx.ReadTimeout:
-        raise HTTPException(503, "Groq API timed out.")
-    except HTTPException:
-        raise
+        raise HTTPException(503, "LLM timed out. Try a smaller/faster model.")
     except Exception as e:
-        raise HTTPException(503, f"Groq request error: {str(e)}")
+        raise HTTPException(503, f"LLM request error: {e}")
 
-    # ---- Normalise to Ollama-style response ----
+    if resp.status_code != 200:
+        raise HTTPException(503, f"LLM error ({resp.status_code}): {resp.text}")
+
+    data = resp.json()
     choice = data.get("choices", [{}])[0]
-    msg    = choice.get("message", {})
+    msg = choice.get("message", {})
     content = msg.get("content") or ""
 
+    # Normalise tool_calls: arguments stored as dict internally
     normalised_tool_calls = []
     for tc in msg.get("tool_calls") or []:
         raw_args = tc.get("function", {}).get("arguments", "{}")
@@ -471,58 +454,45 @@ async def _call_groq(messages: list[dict]) -> dict:
         else:
             parsed_args = raw_args or {}
 
-        normalised_tool_calls.append({
-            "id": tc.get("id", ""),
-            "function": {
-                "name":      tc["function"]["name"],
-                "arguments": parsed_args,   # stored as dict internally
-            },
-        })
+        normalised_tool_calls.append(
+            {
+                "id": tc.get("id", ""),
+                "function": {
+                    "name": tc["function"]["name"],
+                    "arguments": parsed_args,
+                },
+            }
+        )
 
     return {
         "message": {
-            "content":    content,
-            "tool_calls": normalised_tool_calls or [],
-        },
-        "done": True,
+            "content": content,
+            "tool_calls": normalised_tool_calls,
+        }
     }
 
 
-async def _call_llm(messages: list[dict]) -> dict:
-    if LLM_PROVIDER == "groq":
-        return await _call_groq(messages)
-    return await _call_ollama(messages)
-
-
 async def _interpret(history: list[dict]) -> str:
-    """Ask the LLM to interpret tool output — text reply only, no tools."""
-    try:
-        if LLM_PROVIDER == "groq":
-            clean = []
-            for m in history:
-                if m.get("role") == "tool":
-                    clean.append({"role": "user", "content": f"[tool result] {m.get('content', '')}"})
-                else:
-                    # Strip tool_calls entirely for the interpret pass — we only want text back
-                    clean.append({"role": m["role"], "content": m.get("content") or ""})
+    """Ask the LLM to summarise tool output — text reply only, no tools."""
+    clean = _sanitise_messages(history)
+    # Strip tool_calls from all messages for the interpret pass
+    for m in clean:
+        m.pop("tool_calls", None)
 
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    f"{GROQ_API_BASE}/chat/completions",
-                    headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                    json={"model": GROQ_MODEL, "messages": clean, "max_tokens": 512},
-                )
-                if resp.status_code == 200:
-                    choice = resp.json().get("choices", [{}])[0]
-                    return choice.get("message", {}).get("content", "") or ""
-        else:
-            async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.post(
-                    f"{OLLAMA_URL}/api/chat",
-                    json={"model": OLLAMA_MODEL, "messages": list(history), "stream": False},
-                )
-                if resp.status_code == 200:
-                    return resp.json().get("message", {}).get("content", "") or ""
+    payload = {
+        "model": LLM_MODEL,
+        "messages": clean,
+        "max_tokens": 512,
+    }
+
+    url = f"{LLM_BASE_URL.rstrip('/')}/chat/completions"
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(url, headers=_build_headers(), json=payload)
+            if resp.status_code == 200:
+                choice = resp.json().get("choices", [{}])[0]
+                return choice.get("message", {}).get("content", "") or ""
     except Exception:
         pass
     return ""
@@ -532,6 +502,7 @@ async def _interpret(history: list[dict]) -> str:
 # ROUTES — Meta / Config
 # ============================================================================
 
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return (Path(__file__).parent / "static" / "index.html").read_text()
@@ -539,40 +510,28 @@ async def index():
 
 @app.get("/health")
 async def health():
-    provider_status = "unknown"
+    status = "unknown"
     models: list[str] = []
 
-    if LLM_PROVIDER == "groq":
-        if GROQ_API_KEY:
-            try:
-                async with httpx.AsyncClient(timeout=5) as client:
-                    r = await client.get(
-                        f"{GROQ_API_BASE}/models",
-                        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-                    )
-                    if r.status_code == 200:
-                        models = [m["id"] for m in r.json().get("data", [])]
-                        provider_status = "ok" if any(GROQ_MODEL in m for m in models) else "model_not_found"
-                    else:
-                        provider_status = "error"
-            except Exception:
-                provider_status = "unreachable"
-        else:
-            provider_status = "no_api_key"
-    else:
-        try:
-            async with httpx.AsyncClient(timeout=5) as client:
-                r = await client.get(f"{OLLAMA_URL}/api/tags")
-                models = [m["name"] for m in r.json().get("models", [])]
-            provider_status = "ok" if OLLAMA_MODEL in models else "model_not_found"
-        except Exception:
-            provider_status = "unreachable"
+    url = f"{LLM_BASE_URL.rstrip('/')}/models"
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            r = await client.get(url, headers=_build_headers())
+            if r.status_code == 200:
+                models = [m["id"] for m in r.json().get("data", [])]
+                status = (
+                    "ok" if any(LLM_MODEL in m for m in models) else "model_not_found"
+                )
+            else:
+                status = "error"
+    except Exception:
+        status = "unreachable"
 
     return {
-        "status": "ok" if provider_status == "ok" else "degraded",
-        "provider": LLM_PROVIDER,
-        "provider_status": provider_status,
-        "model_selected": _active_model(),
+        "status": "ok" if status == "ok" else "degraded",
+        "llm_base_url": LLM_BASE_URL,
+        "llm_status": status,
+        "model_selected": LLM_MODEL,
         "models_available": models,
         "jenkins": JENKINS_URL,
         "sonarqube": SONAR_URL,
@@ -612,62 +571,49 @@ async def reset_conversation():
 
     saved_id = None
     if _conversation_history:
+        assert _active_conversation_id is not None
         _save_conversation(_active_conversation_id, list(_conversation_history))
         saved_id = _active_conversation_id
 
     _conversation_history.clear()
     _active_conversation_id = str(uuid.uuid4())
 
-    return {"status": "cleared", "saved_as": saved_id, "new_session_id": _active_conversation_id}
+    return {
+        "status": "cleared",
+        "saved_as": saved_id,
+        "new_session_id": _active_conversation_id,
+    }
 
 
 # ============================================================================
 # SERVER CONFIG
 # ============================================================================
 
+
 @app.get("/server-config")
 async def get_server_config():
     return {
-        "provider":         LLM_PROVIDER,
-        "ollama_url":       OLLAMA_URL,
-        "ollama_model":     OLLAMA_MODEL,
-        "groq_model":       GROQ_MODEL,
-        "groq_key_set":     bool(GROQ_API_KEY),
-        "jenkins_url":      JENKINS_URL,
-        "jenkins_key_set":  bool(JENKINS_TOKEN),
-        "sonar_url":        SONAR_URL,
-        "sonar_key_set":    bool(SONAR_TOKEN),
+        "llm_base_url": LLM_BASE_URL,
+        "llm_model": LLM_MODEL,
+        "llm_key_set": bool(LLM_API_KEY),
+        "jenkins_url": JENKINS_URL,
+        "jenkins_key_set": bool(JENKINS_TOKEN),
+        "sonar_url": SONAR_URL,
+        "sonar_key_set": bool(SONAR_TOKEN),
     }
 
 
 @app.post("/server-config")
 async def set_server_config(body: dict):
-    global LLM_PROVIDER, OLLAMA_URL, OLLAMA_MODEL, GROQ_API_KEY, GROQ_MODEL
+    global LLM_BASE_URL, LLM_API_KEY, LLM_MODEL
     global JENKINS_URL, JENKINS_TOKEN, SONAR_URL, SONAR_TOKEN
 
-    provider = body.get("provider", "").lower()
-    url      = body.get("url",      "").strip()
-    model    = body.get("model",    "").strip()
-    api_key  = body.get("api_key",  "")
-
-    if provider in ("ollama", "groq"):
-        LLM_PROVIDER = provider
-
-    if url:
-        if not provider:
-            LLM_PROVIDER = "groq" if ("groq.com" in url or "openai.com" in url) else "ollama"
-        if LLM_PROVIDER != "groq":
-            OLLAMA_URL = url
-
-    if model:
-        if LLM_PROVIDER == "groq":
-            GROQ_MODEL = model
-        else:
-            OLLAMA_MODEL = model
-
-    if api_key:
-        GROQ_API_KEY = api_key
-
+    if body.get("llm_base_url"):
+        LLM_BASE_URL = body["llm_base_url"].strip()
+    if body.get("llm_model"):
+        LLM_MODEL = body["llm_model"].strip()
+    if body.get("llm_api_key"):
+        LLM_API_KEY = body["llm_api_key"]
     if body.get("jenkins_url"):
         JENKINS_URL = body["jenkins_url"].strip()
     if body.get("jenkins_token"):
@@ -678,54 +624,31 @@ async def set_server_config(body: dict):
         SONAR_TOKEN = body["sonar_token"]
 
     return {
-        "status":          "ok",
-        "provider":        LLM_PROVIDER,
-        "ollama_url":      OLLAMA_URL,
-        "model":           _active_model(),
-        "groq_key_set":    bool(GROQ_API_KEY),
-        "jenkins_url":     JENKINS_URL,
+        "status": "ok",
+        "llm_base_url": LLM_BASE_URL,
+        "llm_model": LLM_MODEL,
+        "llm_key_set": bool(LLM_API_KEY),
+        "jenkins_url": JENKINS_URL,
         "jenkins_key_set": bool(JENKINS_TOKEN),
-        "sonar_url":       SONAR_URL,
-        "sonar_key_set":   bool(SONAR_TOKEN),
+        "sonar_url": SONAR_URL,
+        "sonar_key_set": bool(SONAR_TOKEN),
     }
 
 
 @app.post("/select-model")
 async def select_model(body: dict):
-    global OLLAMA_MODEL, GROQ_MODEL, LLM_PROVIDER
-    model_name = body.get("model", "")
-    provider   = body.get("provider", LLM_PROVIDER).lower()
-
-    if provider not in ("ollama", "groq"):
-        return {"error": "provider must be 'ollama' or 'groq'"}
-
-    LLM_PROVIDER = provider
-
-    if provider == "groq":
-        if model_name:
-            GROQ_MODEL = model_name
-        return {"status": "ok", "provider": "groq", "selected_model": GROQ_MODEL}
-
-    available: list[str] = []
-    try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(f"{OLLAMA_URL}/api/tags")
-            available = [m["name"] for m in r.json().get("models", [])]
-    except Exception:
-        pass
-
-    if model_name and model_name not in available:
-        return {"error": f"Model '{model_name}' not found. Available: {available}"}
-
-    if model_name:
-        OLLAMA_MODEL = model_name
-
-    return {"status": "ok", "provider": "ollama", "selected_model": OLLAMA_MODEL, "available_models": available}
+    global LLM_MODEL
+    model_name = body.get("model", "").strip()
+    if not model_name:
+        raise HTTPException(400, "Missing 'model' field")
+    LLM_MODEL = model_name
+    return {"status": "ok", "model": LLM_MODEL}
 
 
 # ============================================================================
 # ROUTES — Conversation History Sidebar
 # ============================================================================
+
 
 @app.get("/conversations")
 async def list_conversations():
@@ -743,13 +666,13 @@ async def load_conversation(conv_id: str):
 @app.post("/conversations/{conv_id}/restore")
 async def restore_conversation(conv_id: str):
     global _active_conversation_id
-
     data = _load_conversation(conv_id)
     if not data:
         raise HTTPException(404, f"Conversation '{conv_id}' not found")
 
     _ensure_active_session()
     if _conversation_history:
+        assert _active_conversation_id is not None
         _save_conversation(_active_conversation_id, list(_conversation_history))
 
     _conversation_history.clear()
@@ -766,8 +689,7 @@ async def restore_conversation(conv_id: str):
 
 @app.delete("/conversations/{conv_id}")
 async def delete_conversation(conv_id: str):
-    deleted = _delete_conversation(conv_id)
-    if not deleted:
+    if not _delete_conversation(conv_id):
         raise HTTPException(404, f"Conversation '{conv_id}' not found")
     return {"status": "deleted", "id": conv_id}
 
@@ -777,14 +699,17 @@ async def save_current_conversation(body: dict = {}):
     _ensure_active_session()
     if not _conversation_history:
         return {"status": "nothing_to_save"}
-    title = body.get("title")
-    meta = _save_conversation(_active_conversation_id, list(_conversation_history), title=title)
+    assert _active_conversation_id is not None
+    meta = _save_conversation(
+        _active_conversation_id, list(_conversation_history), title=body.get("title")
+    )
     return {"status": "saved", **meta}
 
 
 # ============================================================================
 # CORE: CHAT  →  APPROVAL CARD
 # ============================================================================
+
 
 @app.post("/chat")
 async def chat(msg: ChatMessage):
@@ -798,21 +723,21 @@ async def chat(msg: ChatMessage):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(503, f"LLM error: {str(e)}")
+        raise HTTPException(503, f"LLM error: {e}")
 
-    message_obj  = data.get("message", {})
-    tool_calls   = message_obj.get("tool_calls", [])
-    text         = message_obj.get("content", "")
+    message_obj = data.get("message", {})
+    tool_calls = message_obj.get("tool_calls", [])
+    text = message_obj.get("content", "")
 
     _conversation_history.append({"role": "user", "content": msg.message})
 
     if tool_calls:
         tool_call = tool_calls[0]
-        call_id   = tool_call.get("id", "")
-        func      = tool_call.get("function", {})
+        call_id = tool_call.get("id", "")
+        func = tool_call.get("function", {})
         tool_name = func.get("name", "")
 
-        raw_args  = func.get("arguments", {})
+        raw_args = func.get("arguments", {})
         if isinstance(raw_args, str):
             try:
                 tool_args = json.loads(raw_args)
@@ -823,13 +748,16 @@ async def chat(msg: ChatMessage):
 
         explanation = text or f"Running {tool_name} to fulfil your request."
 
-        _conversation_history.append({
-            "role": "assistant",
-            "content": text,
-            "tool_calls": tool_calls,
-        })
+        _conversation_history.append(
+            {
+                "role": "assistant",
+                "content": text,
+                "tool_calls": tool_calls,
+            }
+        )
 
         from scanner import pre_scan
+
         scan_result = pre_scan(tool_name, tool_args)
 
         needs_card = True
@@ -840,13 +768,16 @@ async def chat(msg: ChatMessage):
 
         if not needs_card:
             from tools import execute_tool
+
             result = execute_tool(tool_name, tool_args)
             output_snippet = str(result.get("output", ""))[:2000]
             _conversation_history.append({"role": "tool", "content": output_snippet})
 
             interpretation = await _interpret(list(_conversation_history))
             if interpretation:
-                _conversation_history.append({"role": "assistant", "content": interpretation})
+                _conversation_history.append(
+                    {"role": "assistant", "content": interpretation}
+                )
 
             return {
                 "type": "auto_executed",
@@ -854,7 +785,7 @@ async def chat(msg: ChatMessage):
                 "tool_args": tool_args,
                 "result": result,
                 "interpretation": interpretation or explanation,
-                "model_used": _active_model(),
+                "model_used": LLM_MODEL,
             }
 
         return {
@@ -864,7 +795,7 @@ async def chat(msg: ChatMessage):
             "tool_args": tool_args,
             "explanation": explanation,
             "scan": scan_result,
-            "model_used": _active_model(),
+            "model_used": LLM_MODEL,
         }
 
     _conversation_history.append({"role": "assistant", "content": text})
@@ -872,7 +803,7 @@ async def chat(msg: ChatMessage):
     return {
         "type": "message",
         "content": text or "(no response from LLM)",
-        "model_used": _active_model(),
+        "model_used": LLM_MODEL,
     }
 
 
@@ -880,18 +811,17 @@ async def chat(msg: ChatMessage):
 # CORE: EXECUTE  →  INTERPRET
 # ============================================================================
 
+
 @app.post("/execute")
 async def execute(body: dict):
     from tools import execute_tool
 
     tool_name = body.get("tool_name")
     tool_args = body.get("tool_args", {})
-
     if not tool_name:
         raise HTTPException(400, "Missing tool_name")
 
     result = execute_tool(tool_name, tool_args)
-
     output_snippet = str(result.get("output", ""))[:2000]
     _conversation_history.append({"role": "tool", "content": output_snippet})
 
@@ -902,19 +832,19 @@ async def execute(body: dict):
     return {
         "result": result,
         "interpretation": interpretation,
-        "model_used": _active_model(),
+        "model_used": LLM_MODEL,
     }
 
 
 @app.post("/reject")
 async def reject(body: dict):
-    tool_call_id = body.get("tool_call_id", "")
-
-    if tool_call_id:
-        _conversation_history.append({
-            "role": "tool",
-            "content": "User rejected this action. Do not retry it.",
-        })
+    if body.get("tool_call_id"):
+        _conversation_history.append(
+            {
+                "role": "tool",
+                "content": "User rejected this action. Do not retry it.",
+            }
+        )
 
     suggestion = "Understood. Let me know what you'd like to do differently."
     try:
@@ -932,9 +862,11 @@ async def reject(body: dict):
 # MCP ENDPOINTS
 # ============================================================================
 
+
 @app.get("/mcp/tools")
 async def mcp_list_tools():
     from tools import TOOL_DEFINITIONS
+
     return {
         "tools": [
             {
@@ -950,6 +882,7 @@ async def mcp_list_tools():
 @app.post("/mcp/call")
 async def mcp_call_tool(body: dict):
     from tools import execute_tool
+
     tool_name = body.get("tool")
     args = body.get("arguments", {})
     if not tool_name:
@@ -966,9 +899,11 @@ async def mcp_call_tool(body: dict):
 # CODE QUALITY
 # ============================================================================
 
+
 @app.post("/scan-code")
 async def scan_code(body: dict):
     from scanner import pre_scan
+
     tool_name = body.get("tool_name")
     tool_args = body.get("tool_args", {})
     if not tool_name:
@@ -986,6 +921,7 @@ async def scan_code(body: dict):
 @app.get("/sonarqube-standards")
 async def sonarqube_standards():
     from scanner import get_sonarqube_project_issues
+
     issues = get_sonarqube_project_issues()
     return {
         "status": issues.get("status"),

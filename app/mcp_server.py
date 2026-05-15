@@ -13,8 +13,6 @@ To use:
 - They can discover/call your tools via MCP protocol
 """
 
-from typing import Any
-import json
 from app.tools import TOOL_DEFINITIONS, execute_tool
 
 
@@ -23,36 +21,32 @@ class MCPServer:
 
     def __init__(self):
         self.tools = TOOL_DEFINITIONS
-    
+
     def list_tools(self) -> dict:
         """MCP: List all available tools."""
         return {
             "tools": [
                 {
-                    "name": t["function"]["name"],
-                    "description": t["function"]["description"],
-                    "inputSchema": t["function"].get("parameters", {})
+                    "name": func["name"],
+                    "description": func["description"],
+                    "inputSchema": func.get("parameters", {}),
                 }
                 for t in self.tools
+                for func in (dict(t["function"]),)  # type: ignore[arg-type]
             ]
         }
-    
+
     def call_tool(self, tool_name: str, arguments: dict) -> dict:
         """MCP: Call a tool by name with arguments."""
         result = execute_tool(tool_name, arguments)
         return {
-            "content": [
-                {
-                    "type": "text",
-                    "text": result.get("output", str(result))
-                }
-            ],
-            "isError": not result.get("success", False)
+            "content": [{"type": "text", "text": result.get("output", str(result))}],
+            "isError": not result.get("success", False),
         }
 
 
 # To expose via MCP HTTP transport:
-# 
+#
 # @app.get("/mcp/tools")
 # async def mcp_list_tools():
 #     """MCP endpoint: list tools."""

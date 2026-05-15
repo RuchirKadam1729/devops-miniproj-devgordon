@@ -27,9 +27,9 @@ import time
 import shutil
 import httpx
 
-SONAR_URL         = os.getenv("SONAR_URL", "http://sonarqube:9000")
-SONAR_TOKEN       = os.getenv("SONAR_TOKEN", "")
-WORKSPACE_ROOT    = os.getenv("WORKSPACE", "/workspace")
+SONAR_URL = os.getenv("SONAR_URL", "http://sonarqube:9000")
+SONAR_TOKEN = os.getenv("SONAR_TOKEN", "")
+WORKSPACE_ROOT = os.getenv("WORKSPACE", "/workspace")
 SONAR_PRESCAN_KEY = "devgordon-prescan"
 SONAR_PRESCAN_DIR = os.path.join(WORKSPACE_ROOT, "tmp", "generated")
 
@@ -39,32 +39,39 @@ def pre_scan(tool_name: str, tool_args: dict) -> dict:
         return _scan_ansible(tool_args.get("playbook_content", ""))
     elif tool_name == "write_workspace_file":
         return _scan_workspace_write(
-            tool_args.get("path", ""),
-            tool_args.get("content", "")
+            tool_args.get("path", ""), tool_args.get("content", "")
         )
     elif tool_name == "kubectl_command":
         return _validate_kubectl(tool_args.get("command", ""))
     elif tool_name == "docker_operation":
         return _validate_docker(tool_args)
     else:
-        return {"status": "skipped", "issues": ["No scanner for this tool type"], "sources": []}
+        return {
+            "status": "skipped",
+            "issues": ["No scanner for this tool type"],
+            "sources": [],
+        }
 
 
 # ── Ansible ───────────────────────────────────────────────────────────────────
 
+
 def _scan_ansible(content: str) -> dict:
     if not content.strip():
-        return {"status": "error", "issues": ["Empty playbook content"], "sources": ["validation"]}
+        return {
+            "status": "error",
+            "issues": ["Empty playbook content"],
+            "sources": ["validation"],
+        }
     issues = []
     sources = []
+    r = _manual_playbook_scan(content)
+    issues.extend(r.get("issues", []))
+    sources.append("pattern-scan")
     if _command_exists("ansible-lint"):
         r = _run_ansible_lint(content)
         issues.extend(r.get("issues", []))
         sources.append("ansible-lint")
-    else:
-        r = _manual_playbook_scan(content)
-        issues.extend(r.get("issues", []))
-        sources.append("pattern-scan")
     if SONAR_TOKEN:
         r = _sonarqube_scan_content(content, "playbook.yml", language="yaml")
         issues.extend(r.get("issues", []))
@@ -84,7 +91,9 @@ def _scan_workspace_write(path: str, content: str) -> dict:
         issues.extend(r.get("issues", []))
         sources.append("pattern-scan")
         if SONAR_TOKEN:
-            r = _sonarqube_scan_content(content, os.path.basename(path), language="yaml")
+            r = _sonarqube_scan_content(
+                content, os.path.basename(path), language="yaml"
+            )
             issues.extend(r.get("issues", []))
             if r.get("status") != "skipped":
                 sources.append("sonarqube")
@@ -102,6 +111,7 @@ def _scan_workspace_write(path: str, content: str) -> dict:
 
 # ── SonarQube real-time pre-scan ──────────────────────────────────────────────
 
+
 def _sonarqube_scan_content(content: str, filename: str, language: str = "py") -> dict:
     """
     Write generated content to /workspace/tmp/generated/, run sonar-scanner,
@@ -118,12 +128,15 @@ def _sonarqube_scan_content(content: str, filename: str, language: str = "py") -
         if r.json().get("status") != "UP":
             return {"status": "skipped", "issues": ["SonarQube not ready"]}
     except Exception:
-        return {"status": "skipped", "issues": [f"SonarQube unreachable at {SONAR_URL}"]}
+        return {
+            "status": "skipped",
+            "issues": [f"SonarQube unreachable at {SONAR_URL}"],
+        }
 
     _ensure_sonar_project(SONAR_PRESCAN_KEY, "DevGordon Pre-scan")
 
     os.makedirs(SONAR_PRESCAN_DIR, exist_ok=True)
-    scan_file  = os.path.join(SONAR_PRESCAN_DIR, filename)
+    scan_file = os.path.join(SONAR_PRESCAN_DIR, filename)
     props_path = os.path.join(SONAR_PRESCAN_DIR, "sonar-project.properties")
 
     with open(scan_file, "w") as f:
@@ -145,8 +158,10 @@ sonar.sourceEncoding=UTF-8
     try:
         result = subprocess.run(
             ["sonar-scanner", f"-Dproject.settings={props_path}"],
-            capture_output=True, text=True, timeout=60,
-            cwd=SONAR_PRESCAN_DIR
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=SONAR_PRESCAN_DIR,
         )
         if result.returncode != 0:
             snippet = (result.stderr or result.stdout)[-400:]
@@ -178,7 +193,7 @@ def _ensure_sonar_project(key: str, name: str):
             f"{SONAR_URL}/api/projects/create",
             params={"projectKey": key, "name": name},
             auth=(SONAR_TOKEN, ""),
-            timeout=5
+            timeout=5,
         )
     except Exception:
         pass
@@ -192,13 +207,16 @@ def _poll_and_fetch(task_id: str, project_key: str, max_wait: int = 30) -> dict:
                 f"{SONAR_URL}/api/ce/task",
                 params={"id": task_id},
                 auth=(SONAR_TOKEN, ""),
-                timeout=5
+                timeout=5,
             )
             status = r.json().get("task", {}).get("status")
             if status == "SUCCESS":
                 return _fetch_sonar_issues(project_key)
             elif status in ("FAILED", "CANCELLED"):
-                return {"status": "skipped", "issues": [f"SonarQube task {status.lower()}"]}
+                return {
+                    "status": "skipped",
+                    "issues": [f"SonarQube task {status.lower()}"],
+                }
             time.sleep(3)
         except Exception:
             break
@@ -209,16 +227,24 @@ def _fetch_sonar_issues(project_key: str) -> dict:
     try:
         r = httpx.get(
             f"{SONAR_URL}/api/issues/search",
-            params={"componentKeys": project_key, "resolved": "false", "ps": 15,
-                    "severities": "BLOCKER,CRITICAL,MAJOR,MINOR"},
+            params={
+                "componentKeys": project_key,
+                "resolved": "false",
+                "ps": 15,
+                "severities": "BLOCKER,CRITICAL,MAJOR,MINOR",
+            },
             auth=(SONAR_TOKEN, ""),
-            timeout=10
+            timeout=10,
         )
         issues = []
         for i in r.json().get("issues", []):
-            sev  = i.get("severity", "INFO")
-            icon = {"BLOCKER": "🚨", "CRITICAL": "🚨", "MAJOR": "⚠", "MINOR": "ℹ"}.get(sev, "ℹ")
-            issues.append(f"{icon} [{sev}] line {i.get('line','?')}: {i.get('message','')} ({i.get('rule','')})")
+            sev = i.get("severity", "INFO")
+            icon = {"BLOCKER": "🚨", "CRITICAL": "🚨", "MAJOR": "⚠", "MINOR": "ℹ"}.get(
+                sev, "ℹ"
+            )
+            issues.append(
+                f"{icon} [{sev}] line {i.get('line', '?')}: {i.get('message', '')} ({i.get('rule', '')})"
+            )
         return {"status": "sonar_complete", "issues": issues}
     except Exception as e:
         return {"status": "skipped", "issues": [f"Could not fetch issues: {e}"]}
@@ -232,20 +258,28 @@ def get_sonarqube_project_issues() -> dict:
             f"{SONAR_URL}/api/issues/search",
             params={"componentKeys": "devgordon", "pageSize": 10},
             auth=(SONAR_TOKEN, ""),
-            timeout=10
+            timeout=10,
         )
         if r.status_code == 200:
-            return {"status": "ok", "issues": [
-                {"type": i.get("type"), "severity": i.get("severity"),
-                 "message": i.get("message"), "component": i.get("component")}
-                for i in r.json().get("issues", [])[:5]
-            ]}
+            return {
+                "status": "ok",
+                "issues": [
+                    {
+                        "type": i.get("type"),
+                        "severity": i.get("severity"),
+                        "message": i.get("message"),
+                        "component": i.get("component"),
+                    }
+                    for i in r.json().get("issues", [])[:5]
+                ],
+            }
     except Exception:
         pass
     return {"status": "error", "issues": []}
 
 
 # ── ansible-lint ─────────────────────────────────────────────────────────────
+
 
 def _run_ansible_lint(content: str) -> dict:
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
@@ -254,15 +288,19 @@ def _run_ansible_lint(content: str) -> dict:
     try:
         result = subprocess.run(
             ["ansible-lint", path, "--parseable", "--nocolor"],
-            capture_output=True, text=True, timeout=20
+            capture_output=True,
+            text=True,
+            timeout=20,
         )
         issues = []
         for line in result.stdout.strip().split("\n"):
             if line.strip():
-                clean = re.sub(r'^.*?\.yml:\d+:\s*', '', line).strip()
+                clean = re.sub(r"^.*?\.yml:\d+:\s*", "", line).strip()
                 if clean:
                     issues.append(clean)
-        status = "error" if result.returncode >= 2 else ("warning" if issues else "clean")
+        status = (
+            "error" if result.returncode >= 2 else ("warning" if issues else "clean")
+        )
         return {"status": status, "issues": issues[:10]}
     except subprocess.TimeoutExpired:
         return {"status": "skipped", "issues": ["ansible-lint timed out"]}
@@ -274,28 +312,39 @@ def _manual_playbook_scan(content: str) -> dict:
     issues = []
     if re.search(r'mode:\s*["\']?0?777', content):
         issues.append("⚠ World-writable file permission (mode: 777) — security risk")
-    if re.search(r'url:\s*http://', content) or re.search(r'get_url.*http://', content):
+    if re.search(r"url:\s*http://", content) or re.search(r"get_url.*http://", content):
         issues.append("⚠ HTTP URL found — use HTTPS to prevent MITM attacks")
-    if re.search(r'(shell|command):\s*.*\{\{.*\}\}', content):
-        issues.append("⚠ Shell/command task uses template variables — verify input is sanitised")
-    if ("become: yes" in content or "become: true" in content) and "become_user" not in content:
+    if re.search(r"(shell|command):\s*.*\{\{.*\}\}", content):
+        issues.append(
+            "⚠ Shell/command task uses template variables — verify input is sanitised"
+        )
+    if (
+        "become: yes" in content or "become: true" in content
+    ) and "become_user" not in content:
         issues.append("⚠ become: yes without become_user — will run as root")
     if "ignore_errors: yes" in content or "ignore_errors: true" in content:
         issues.append("ℹ ignore_errors used — failures will be silently skipped")
-    if re.search(r'(password|secret|token|key).*:', content, re.IGNORECASE) and "no_log" not in content:
+    if (
+        re.search(r"(password|secret|token|key).*:", content, re.IGNORECASE)
+        and "no_log" not in content
+    ):
         issues.append("ℹ Task may handle secrets — consider no_log: true")
     if not issues:
         return {"status": "clean", "issues": []}
-    return {"status": "warning" if any("⚠" in i for i in issues) else "info", "issues": issues}
+    return {
+        "status": "warning" if any("⚠" in i for i in issues) else "info",
+        "issues": issues,
+    }
 
 
 # ── Shell scan ────────────────────────────────────────────────────────────────
+
 
 def _scan_shell(content: str) -> list:
     issues = []
     if "rm -rf /" in content:
         issues.append("🚨 rm -rf / — would delete the entire filesystem")
-    if re.search(r'curl.*\|\s*(bash|sh)', content):
+    if re.search(r"curl.*\|\s*(bash|sh)", content):
         issues.append("⚠ Piping curl output to shell — verify the URL is trusted")
     if "chmod 777" in content:
         issues.append("⚠ chmod 777 — world-writable permissions")
@@ -305,6 +354,7 @@ def _scan_shell(content: str) -> list:
 
 
 # ── kubectl & docker validation ───────────────────────────────────────────────
+
 
 def _validate_kubectl(command: str) -> dict:
     issues = []
@@ -317,17 +367,28 @@ def _validate_kubectl(command: str) -> dict:
         issues.append("⚠ --force bypasses graceful termination")
     if "--all" in cmd_lower and "delete" in cmd_lower:
         issues.append("🚨 Deleting ALL resources in the namespace")
-    return {"status": "warning" if issues else "clean", "issues": issues, "sources": ["validation"]}
+    return {
+        "status": "warning" if issues else "clean",
+        "issues": issues,
+        "sources": ["validation"],
+    }
 
 
 def _validate_docker(args: dict) -> dict:
     issues = []
     if args.get("operation") == "prune":
-        issues.append("⚠ docker system prune removes all stopped containers, dangling images, and unused networks")
-    return {"status": "warning" if issues else "clean", "issues": issues, "sources": ["validation"]}
+        issues.append(
+            "⚠ docker system prune removes all stopped containers, dangling images, and unused networks"
+        )
+    return {
+        "status": "warning" if issues else "clean",
+        "issues": issues,
+        "sources": ["validation"],
+    }
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
 
 def _aggregate(issues: list, sources: list) -> dict:
     if not issues:
@@ -338,7 +399,12 @@ def _aggregate(issues: list, sources: list) -> dict:
         status = "warning"
     else:
         status = "info"
-    return {"status": status, "issues": issues, "sources": sources, "can_approve": status != "error"}
+    return {
+        "status": status,
+        "issues": issues,
+        "sources": sources,
+        "can_approve": status != "error",
+    }
 
 
 def _command_exists(cmd: str) -> bool:

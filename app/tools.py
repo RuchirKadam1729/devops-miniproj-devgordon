@@ -18,6 +18,7 @@ import os
 import subprocess
 import json
 import requests
+from typing import Any
 
 # Jenkins connection details — pulled from env vars set in docker-compose.yml
 JENKINS_URL = os.getenv("JENKINS_URL", "http://jenkins:8080")
@@ -30,7 +31,7 @@ JENKINS_TOKEN = os.getenv("JENKINS_TOKEN", "")
 # The LLM uses "name" and "description" to decide when to call a tool.
 # The "input_schema" tells it what arguments to provide.
 # ----------------------------------------------------------------
-TOOL_DEFINITIONS = [
+TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -46,22 +47,22 @@ TOOL_DEFINITIONS = [
                 "properties": {
                     "playbook_content": {
                         "type": "string",
-                        "description": "Full YAML content of the Ansible playbook to run"
+                        "description": "Full YAML content of the Ansible playbook to run",
                     },
                     "inventory": {
                         "type": "string",
                         "description": "Inventory content or 'localhost' for local execution",
-                        "default": "localhost,"
+                        "default": "localhost,",
                     },
                     "extra_vars": {
                         "type": "string",
                         "description": "Extra variables to pass to ansible-playbook as JSON string",
-                        "default": "{}"
-                    }
+                        "default": "{}",
+                    },
                 },
-                "required": ["playbook_content"]
-            }
-        }
+                "required": ["playbook_content"],
+            },
+        },
     },
     {
         "type": "function",
@@ -76,22 +77,22 @@ TOOL_DEFINITIONS = [
                 "properties": {
                     "job_name": {
                         "type": "string",
-                        "description": "Name of the Jenkins job/pipeline to trigger"
+                        "description": "Name of the Jenkins job/pipeline to trigger",
                     },
                     "parameters": {
                         "type": "object",
                         "description": "Build parameters as key-value pairs",
-                        "default": {}
+                        "default": {},
                     },
                     "wait_for_result": {
                         "type": "boolean",
                         "description": "Whether to wait and return the build result",
-                        "default": True
-                    }
+                        "default": True,
+                    },
                 },
-                "required": ["job_name"]
-            }
-        }
+                "required": ["job_name"],
+            },
+        },
     },
     {
         "type": "function",
@@ -107,17 +108,17 @@ TOOL_DEFINITIONS = [
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "kubectl command WITHOUT the 'kubectl' prefix. E.g. 'get pods -n default' or 'describe deployment myapp'"
+                        "description": "kubectl command WITHOUT the 'kubectl' prefix. E.g. 'get pods -n default' or 'describe deployment myapp'",
                     },
                     "namespace": {
                         "type": "string",
                         "description": "Kubernetes namespace",
-                        "default": "default"
-                    }
+                        "default": "default",
+                    },
                 },
-                "required": ["command"]
-            }
-        }
+                "required": ["command"],
+            },
+        },
     },
     {
         "type": "function",
@@ -134,17 +135,25 @@ TOOL_DEFINITIONS = [
                     "operation": {
                         "type": "string",
                         "description": "One of: ps, images, logs, stats, pull, prune, inspect",
-                        "enum": ["ps", "images", "logs", "stats", "pull", "prune", "inspect"]
+                        "enum": [
+                            "ps",
+                            "images",
+                            "logs",
+                            "stats",
+                            "pull",
+                            "prune",
+                            "inspect",
+                        ],
                     },
                     "args": {
                         "type": "string",
                         "description": "Additional arguments for the docker command",
-                        "default": ""
-                    }
+                        "default": "",
+                    },
                 },
-                "required": ["operation"]
-            }
-        }
+                "required": ["operation"],
+            },
+        },
     },
     {
         "type": "function",
@@ -161,22 +170,22 @@ TOOL_DEFINITIONS = [
                     "action": {
                         "type": "string",
                         "description": "One of: list_jobs, job_status, build_log, health",
-                        "enum": ["list_jobs", "job_status", "build_log", "health"]
+                        "enum": ["list_jobs", "job_status", "build_log", "health"],
                     },
                     "job_name": {
                         "type": "string",
                         "description": "Job name (required for job_status and build_log)",
-                        "default": ""
+                        "default": "",
                     },
                     "build_number": {
                         "type": "integer",
                         "description": "Build number for build_log (default: last build)",
-                        "default": 0
-                    }
+                        "default": 0,
+                    },
                 },
-                "required": ["action"]
-            }
-        }
+                "required": ["action"],
+            },
+        },
     },
     {
         "type": "function",
@@ -193,12 +202,12 @@ TOOL_DEFINITIONS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative path from project root, e.g. 'Jenkinsfile' or 'k8s/deployment.yaml' or 'app/main.py'"
+                        "description": "Relative path from project root, e.g. 'Jenkinsfile' or 'k8s/deployment.yaml' or 'app/main.py'",
                     }
                 },
-                "required": ["path"]
-            }
-        }
+                "required": ["path"],
+            },
+        },
     },
     {
         "type": "function",
@@ -215,20 +224,20 @@ TOOL_DEFINITIONS = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Relative path from project root, e.g. 'Jenkinsfile' or 'k8s/deployment.yaml'"
+                        "description": "Relative path from project root, e.g. 'Jenkinsfile' or 'k8s/deployment.yaml'",
                     },
                     "content": {
                         "type": "string",
-                        "description": "Full file content to write"
+                        "description": "Full file content to write",
                     },
                     "reason": {
                         "type": "string",
-                        "description": "Brief explanation of what is being changed and why"
-                    }
+                        "description": "Brief explanation of what is being changed and why",
+                    },
                 },
-                "required": ["path", "content"]
-            }
-        }
+                "required": ["path", "content"],
+            },
+        },
     },
     {
         "type": "function",
@@ -245,18 +254,19 @@ TOOL_DEFINITIONS = [
                     "directory": {
                         "type": "string",
                         "description": "Relative directory path to list, e.g. '' for root, 'app', 'k8s', 'ansible'",
-                        "default": ""
+                        "default": "",
                     }
-                }
-            }
-        }
-    }
+                },
+            },
+        },
+    },
 ]
 
 
 # ----------------------------------------------------------------
 # EXECUTOR — runs after user approval
 # ----------------------------------------------------------------
+
 
 def execute_tool(tool_name: str, args: dict) -> dict:
     """
@@ -315,7 +325,7 @@ def _run_ansible(args: dict) -> dict:
             cmd,
             capture_output=True,
             text=True,
-            timeout=120  # 2 minute timeout
+            timeout=120,  # 2 minute timeout
         )
         success = result.returncode == 0
         output = result.stdout + ("\n" + result.stderr if result.stderr else "")
@@ -323,13 +333,16 @@ def _run_ansible(args: dict) -> dict:
     except subprocess.TimeoutExpired:
         return {"success": False, "output": "Timed out after 120 seconds"}
     except FileNotFoundError:
-        return {"success": False, "output": "ansible-playbook not found. Is Ansible installed?"}
+        return {
+            "success": False,
+            "output": "ansible-playbook not found. Is Ansible installed?",
+        }
     finally:
         os.unlink(playbook_path)
         if inv_path and "\n" in inventory:
             try:
                 os.unlink(inv_path)
-            except:
+            except Exception:
                 pass
 
 
@@ -341,7 +354,7 @@ def _trigger_jenkins(args: dict) -> dict:
     """
     job_name = args.get("job_name", "")
     parameters = args.get("parameters", {})
-    wait = args.get("wait_for_result", True)
+    args.get("wait_for_result", True)
 
     if not JENKINS_TOKEN:
         return {"success": False, "output": "JENKINS_TOKEN not set in environment"}
@@ -351,8 +364,7 @@ def _trigger_jenkins(args: dict) -> dict:
     # Get CSRF crumb first (Jenkins security requirement)
     try:
         crumb_resp = requests.get(
-            f"{JENKINS_URL}/crumbIssuer/api/json",
-            auth=auth, timeout=10
+            f"{JENKINS_URL}/crumbIssuer/api/json", auth=auth, timeout=10
         )
         crumb_data = crumb_resp.json()
         headers = {crumb_data["crumbRequestField"]: crumb_data["crumb"]}
@@ -362,18 +374,29 @@ def _trigger_jenkins(args: dict) -> dict:
     try:
         if parameters:
             url = f"{JENKINS_URL}/job/{job_name}/buildWithParameters"
-            resp = requests.post(url, auth=auth, headers=headers,
-                                 params=parameters, timeout=10)
+            resp = requests.post(
+                url, auth=auth, headers=headers, params=parameters, timeout=10
+            )
         else:
             url = f"{JENKINS_URL}/job/{job_name}/build"
             resp = requests.post(url, auth=auth, headers=headers, timeout=10)
 
         if resp.status_code in (200, 201):
-            return {"success": True, "output": f"Build triggered for '{job_name}'. Check Jenkins at {JENKINS_URL}/job/{job_name}"}
+            return {
+                "success": True,
+                "output": f"Build triggered for '{job_name}'. Check Jenkins at {JENKINS_URL}/job/{job_name}",
+            }
         else:
-            return {"success": False, "output": f"Jenkins returned {resp.status_code}: {resp.text}"}
+            return {
+                "success": False,
+                "output": f"Jenkins returned {resp.status_code}: {resp.text}",
+            }
     except requests.exceptions.ConnectionError:
-        return {"success": False, "output": f"Cannot connect to Jenkins at {JENKINS_URL}. Is it running?"}
+        return {
+            "success": False,
+            "output": f"Cannot connect to Jenkins at {JENKINS_URL}. Is it running?",
+        }
+
 
 def _get_kube_server():
     """Extract Kubernetes API server from kubeconfig with multiple fallbacks."""
@@ -388,28 +411,41 @@ def _get_kube_server():
         "/.kube/config",  # Container mount point
         os.getenv("KUBECONFIG", ""),
     ]
-    
+
     for kube_path in kubeconfig_paths:
         if not kube_path or not os.path.exists(kube_path):
             continue
         try:
             import yaml
+
             with open(kube_path) as f:
                 cfg = yaml.safe_load(f)
             if not cfg or not cfg.get("clusters"):
                 continue
-                
+
             current_context = cfg.get("current-context", "")
-            ctx = next((c["context"] for c in cfg.get("contexts", [])
-                        if c["name"] == current_context), {})
+            ctx = next(
+                (
+                    c["context"]
+                    for c in cfg.get("contexts", [])
+                    if c["name"] == current_context
+                ),
+                {},
+            )
             cluster_name = ctx.get("cluster", "")
-            cluster = next((c["cluster"] for c in cfg.get("clusters", [])
-                            if c["name"] == cluster_name), {})
+            cluster = next(
+                (
+                    c["cluster"]
+                    for c in cfg.get("clusters", [])
+                    if c["name"] == cluster_name
+                ),
+                {},
+            )
             server = cluster.get("server", "")
 
             if not server:
                 continue
-                
+
             # Rewrite localhost/127.0.0.1 to host.docker.internal for Docker Desktop
             if "127.0.0.1" in server:
                 return server.replace("127.0.0.1", "host.docker.internal"), True
@@ -417,30 +453,31 @@ def _get_kube_server():
                 return server.replace("localhost", "host.docker.internal"), True
             if "host.docker.internal" in server:
                 return server, True
-            
+
             # Return as-is if it's an external server
             return server, True
-        except Exception as e:
+        except Exception:
             continue
 
     # Priority 3: Fallback to Docker Desktop default with insecure mode
     # This handles the case where kubeconfig is missing but kubectl is available
     return None, False
 
+
 def _kubectl(args: dict) -> dict:
     """Run kubectl with explicit kubeconfig and server override for Docker Desktop."""
     import yaml
-    
+
     command = args.get("command", "").strip()
     namespace = args.get("namespace", "default")
 
     if not command:
         return {"success": False, "output": "No command provided"}
-    
+
     cmd_parts = command.split()
     kubeconfig_path = os.getenv("KUBECONFIG", os.path.expanduser("~/.kube/config"))
     port = "57106"  # Fallback Docker Desktop API port
-    
+
     # Extract actual port from kubeconfig
     if os.path.exists(kubeconfig_path):
         try:
@@ -457,27 +494,34 @@ def _kubectl(args: dict) -> dict:
                                 port = server.split(":")[-1]
                             break
                     break
-        except:
+        except Exception:
             pass
-    
+
     # Build command with explicit kubeconfig and server override
     full_cmd = [
         "kubectl",
         f"--kubeconfig={kubeconfig_path}",
         f"--server=https://host.docker.internal:{port}",
-        "--insecure-skip-tls-verify"
+        "--insecure-skip-tls-verify",
     ] + cmd_parts
-    
+
     # Add namespace if applicable
     ns_supporting = ["get", "describe", "logs", "delete", "apply", "rollout", "scale"]
-    if cmd_parts and cmd_parts[0] in ns_supporting and "-n" not in command and "--namespace" not in command:
+    if (
+        cmd_parts
+        and cmd_parts[0] in ns_supporting
+        and "-n" not in command
+        and "--namespace" not in command
+    ):
         full_cmd += ["-n", namespace]
 
     try:
         result = subprocess.run(
             full_cmd,
-            capture_output=True, text=True, timeout=30,
-            stdin=subprocess.DEVNULL
+            capture_output=True,
+            text=True,
+            timeout=30,
+            stdin=subprocess.DEVNULL,
         )
         output = result.stdout + (result.stderr if result.stderr else "")
         return {"success": result.returncode == 0, "output": output}
@@ -489,19 +533,18 @@ def _kubectl(args: dict) -> dict:
         return {"success": False, "output": f"error: {str(e)}"}
 
 
-
 def _docker(args: dict) -> dict:
     """Docker operations that are safe to run (no build/run to avoid side effects)."""
     operation = args.get("operation", "ps")
     extra_args = args.get("args", "").strip()
 
     op_map = {
-        "ps":      ["docker", "ps", "-a"],
-        "images":  ["docker", "images"],
-        "logs":    ["docker", "logs"],
-        "stats":   ["docker", "stats", "--no-stream"],
-        "pull":    ["docker", "pull"],
-        "prune":   ["docker", "system", "prune", "-f"],
+        "ps": ["docker", "ps", "-a"],
+        "images": ["docker", "images"],
+        "logs": ["docker", "logs"],
+        "stats": ["docker", "stats", "--no-stream"],
+        "pull": ["docker", "pull"],
+        "prune": ["docker", "system", "prune", "-f"],
         "inspect": ["docker", "inspect"],
     }
 
@@ -533,29 +576,47 @@ def _jenkins_status(args: dict) -> dict:
             resp = requests.get(f"{JENKINS_URL}/api/json", auth=auth, timeout=5)
             data = resp.json()
             jobs = [j["name"] for j in data.get("jobs", [])]
-            return {"success": True, "output": f"Jenkins is up. Jobs: {', '.join(jobs) or 'none'}"}
+            return {
+                "success": True,
+                "output": f"Jenkins is up. Jobs: {', '.join(jobs) or 'none'}",
+            }
 
         elif action == "list_jobs":
             resp = requests.get(f"{JENKINS_URL}/api/json", auth=auth, timeout=5)
             data = resp.json()
-            jobs = [{"name": j["name"], "color": j.get("color", "?")} for j in data.get("jobs", [])]
+            jobs = [
+                {"name": j["name"], "color": j.get("color", "?")}
+                for j in data.get("jobs", [])
+            ]
             return {"success": True, "output": json.dumps(jobs, indent=2)}
 
         elif action == "job_status" and job_name:
-            resp = requests.get(f"{JENKINS_URL}/job/{job_name}/lastBuild/api/json", auth=auth, timeout=5)
+            resp = requests.get(
+                f"{JENKINS_URL}/job/{job_name}/lastBuild/api/json", auth=auth, timeout=5
+            )
             data = resp.json()
-            return {"success": True, "output": f"Last build: #{data.get('number')} — {data.get('result')} ({data.get('duration', 0)//1000}s)"}
+            return {
+                "success": True,
+                "output": f"Last build: #{data.get('number')} — {data.get('result')} ({data.get('duration', 0) // 1000}s)",
+            }
 
         elif action == "build_log" and job_name:
             build_num = args.get("build_number", 0)
             build_ref = build_num if build_num else "lastBuild"
-            resp = requests.get(f"{JENKINS_URL}/job/{job_name}/{build_ref}/consoleText", auth=auth, timeout=10)
+            resp = requests.get(
+                f"{JENKINS_URL}/job/{job_name}/{build_ref}/consoleText",
+                auth=auth,
+                timeout=10,
+            )
             # Truncate to last 3000 chars so we don't overwhelm the LLM
             log = resp.text[-3000:] if len(resp.text) > 3000 else resp.text
             return {"success": True, "output": log}
 
     except requests.exceptions.ConnectionError:
-        return {"success": False, "output": f"Cannot connect to Jenkins at {JENKINS_URL}"}
+        return {
+            "success": False,
+            "output": f"Cannot connect to Jenkins at {JENKINS_URL}",
+        }
     except Exception as e:
         return {"success": False, "output": str(e)}
 
@@ -570,6 +631,7 @@ WORKSPACE_ROOT = os.getenv("WORKSPACE", "/workspace")
 
 # Files DevGordon is never allowed to read or write
 _BLOCKED_PATHS = {".env", ".env.example"}
+
 
 def _safe_workspace_path(relative_path: str) -> tuple[str, str | None]:
     """
@@ -605,10 +667,16 @@ def _read_workspace_file(args: dict) -> dict:
         return {"success": False, "output": err}
 
     if not os.path.exists(abs_path):
-        return {"success": False, "output": f"File not found: {path}\nWorkspace root: {WORKSPACE_ROOT}"}
+        return {
+            "success": False,
+            "output": f"File not found: {path}\nWorkspace root: {WORKSPACE_ROOT}",
+        }
 
     if not os.path.isfile(abs_path):
-        return {"success": False, "output": f"'{path}' is a directory, not a file. Use list_workspace to explore."}
+        return {
+            "success": False,
+            "output": f"'{path}' is a directory, not a file. Use list_workspace to explore.",
+        }
 
     try:
         with open(abs_path, "r", errors="replace") as f:
@@ -616,12 +684,15 @@ def _read_workspace_file(args: dict) -> dict:
         size = len(content)
         # Truncate very large files so we don't blow the context window
         if size > 12000:
-            content = content[:12000] + f"\n\n[... truncated — file is {size} chars, showing first 12000]"
+            content = (
+                content[:12000]
+                + f"\n\n[... truncated — file is {size} chars, showing first 12000]"
+            )
         return {
             "success": True,
             "output": f"=== {path} ===\n{content}",
             "path": path,
-            "size": size
+            "size": size,
         }
     except Exception as e:
         return {"success": False, "output": f"Could not read file: {e}"}
@@ -645,14 +716,17 @@ def _write_workspace_file(args: dict) -> dict:
     # Don't allow writing outside existing directories (no mkdir -p)
     parent = os.path.dirname(abs_path)
     if not os.path.isdir(parent):
-        return {"success": False, "output": f"Parent directory does not exist: {os.path.dirname(path)}"}
+        return {
+            "success": False,
+            "output": f"Parent directory does not exist: {os.path.dirname(path)}",
+        }
 
     try:
         with open(abs_path, "w") as f:
             f.write(content)
         return {
             "success": True,
-            "output": f"✓ Written {len(content)} chars to {path}\nReason: {reason}"
+            "output": f"✓ Written {len(content)} chars to {path}\nReason: {reason}",
         }
     except Exception as e:
         return {"success": False, "output": f"Could not write file: {e}"}
@@ -661,20 +735,27 @@ def _write_workspace_file(args: dict) -> dict:
 def _list_workspace(args: dict) -> dict:
     """List files in a workspace directory."""
     directory = args.get("directory", "").strip().lstrip("/")
-    abs_path, err = _safe_workspace_path(directory) if directory else (WORKSPACE_ROOT, None)
+    abs_path, err = (
+        _safe_workspace_path(directory) if directory else (WORKSPACE_ROOT, None)
+    )
 
     if err:
         return {"success": False, "output": err}
 
     if not os.path.exists(abs_path):
-        return {"success": False, "output": f"Directory not found: {directory or '(root)'}"}
+        return {
+            "success": False,
+            "output": f"Directory not found: {directory or '(root)'}",
+        }
 
     if not os.path.isdir(abs_path):
         return {"success": False, "output": f"'{directory}' is a file, not a directory"}
 
     try:
         lines = []
-        for entry in sorted(os.scandir(abs_path), key=lambda e: (not e.is_dir(), e.name)):
+        for entry in sorted(
+            os.scandir(abs_path), key=lambda e: (not e.is_dir(), e.name)
+        ):
             # Skip hidden files and tmp generated dir
             if entry.name.startswith(".") or entry.name == "__pycache__":
                 continue
@@ -688,7 +769,7 @@ def _list_workspace(args: dict) -> dict:
         display_dir = directory or "(project root)"
         return {
             "success": True,
-            "output": f"Contents of {display_dir}:\n" + "\n".join(lines)
+            "output": f"Contents of {display_dir}:\n" + "\n".join(lines),
         }
     except Exception as e:
         return {"success": False, "output": f"Could not list directory: {e}"}
